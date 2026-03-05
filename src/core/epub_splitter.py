@@ -228,12 +228,56 @@ def sort_items_by_spine(items, spine_order):
                      if any(c.isdigit() for c in x.get_id()) else float('inf'))
 
 
-def extract_chapters(items):
+def extract_toc_titles(book):
+    """
+    从EPUB的目录(TOC)中提取章节标题映射
+    
+    Args:
+        book: EPUB book对象
+    
+    Returns:
+        dict: 文件名到标题的映射字典
+    """
+    toc_map = {}
+
+    def normalize_href_to_filename(href):
+        """将TOC链接标准化为文件名键（去路径、去锚点）"""
+        normalized_href = href.split('#')[0]
+        return normalized_href.split('/')[-1]
+    
+    def process_toc_items(toc_items):
+        """递归处理TOC项目"""
+        for item in toc_items:
+            if hasattr(item, 'href') and hasattr(item, 'title'):
+                filename = normalize_href_to_filename(item.href)
+                toc_map[filename] = item.title.strip()
+            elif isinstance(item, tuple) and len(item) == 2:
+                # 处理嵌套的TOC结构
+                section, children = item
+                if hasattr(section, 'href') and hasattr(section, 'title'):
+                    filename = normalize_href_to_filename(section.href)
+                    toc_map[filename] = section.title.strip()
+                if children:
+                    process_toc_items(children)
+    
+    try:
+        if book.toc:
+            if isinstance(book.toc, (list, tuple)):
+                process_toc_items(book.toc)
+            logger.info(f"从TOC中提取了 {len(toc_map)} 个章节标题")
+    except Exception as e:
+        logger.warning(f"提取TOC标题时出错: {e}")
+    
+    return toc_map
+
+
+def extract_chapters(items, toc_map=None):
     """
     从HTML文档中提取章节内容
     
     Args:
         items: 排序后的文档项列表
+        toc_map: 可选的TOC标题映射字典
     
     Returns:
         list: 包含(章节标题, 章节内容)元组的列表
@@ -245,13 +289,23 @@ def extract_chapters(items):
             # 解码HTML内容
             html_content = item.get_content().decode('utf-8')
             
-            # 提取章节标题
-            chapter_title = extract_title_from_html(html_content)
+            # 优先从TOC获取章节标题
+            chapter_title = None
+            item_name = item.get_name()
+            item_filename = item_name.split('#')[0].split('/')[-1]
             
-            # 如果无法提取标题，使用索引作为标题
+            if toc_map and item_filename in toc_map:
+                chapter_title = toc_map[item_filename]
+                logger.debug(f"从TOC获取标题: {chapter_title}")
+            
+            # 如果TOC中没有，尝试从HTML内容提取
             if not chapter_title:
-                item_id = item.get_id()
-                chapter_title = f"Chapter {index + 1} (ID: {item_id})"
+                chapter_title = extract_title_from_html(html_content)
+            
+            # 如果仍无法提取标题，使用简洁的回退格式
+            if not chapter_title:
+                chapter_title = f"Chapter_{index + 1}"
+                logger.debug(f"使用回退标题: {chapter_title}")
             
             # 提取章节文本
             chapter_text = html_to_text(html_content)
@@ -367,8 +421,11 @@ def split_epub(epub_path, output_dir, chapters_per_file=100, use_range_in_filena
         spine_order = get_spine_order(book)
         items = sort_items_by_spine(items, spine_order)
         
+        # 从TOC提取章节标题映射
+        toc_map = extract_toc_titles(book)
+        
         # 提取章节
-        chapters = extract_chapters(items)
+        chapters = extract_chapters(items, toc_map)
         
         logger.info(f"成功提取 {len(chapters)} 个章节")
         

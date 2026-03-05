@@ -87,10 +87,18 @@ def load_api_config():
         # 加载Gemini API配置
         if 'gemini_api' in config_data and isinstance(config_data['gemini_api'], list):
             GEMINI_API_CONFIG = config_data['gemini_api']
+            # 确保每项存在 name 字段
+            for item in GEMINI_API_CONFIG:
+                if 'name' not in item:
+                    item['name'] = ""
         
         # 加载OpenAI API配置
         if 'openai_api' in config_data and isinstance(config_data['openai_api'], list):
             OPENAI_API_CONFIG = config_data['openai_api']
+            # 确保每项存在 name 字段
+            for item in OPENAI_API_CONFIG:
+                if 'name' not in item:
+                    item['name'] = ""
             
         # 加载max_rpm值（如果存在）
         if 'max_rpm' in config_data and isinstance(config_data['max_rpm'], int):

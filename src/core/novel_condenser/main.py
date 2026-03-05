@@ -123,13 +123,19 @@ class NovelCondenser:
             result = api_func(test_content, key_config, key_manager)
             
             if result:
-                logger.info(f"✓ {api_type.capitalize()}密钥 {masked_key} 有效")
+                name = key_config.get('name') if isinstance(key_config, dict) else None
+                display = name if name else masked_key
+                logger.info(f"✓ {api_type.capitalize()}密钥 {display} 有效")
                 return True
             else:
-                logger.error(f"✗ {api_type.capitalize()}密钥 {masked_key} 无法获取有效响应")
+                name = key_config.get('name') if isinstance(key_config, dict) else None
+                display = name if name else masked_key
+                logger.error(f"✗ {api_type.capitalize()}密钥 {display} 无法获取有效响应")
                 return False
         except Exception as e:
-            logger.error(f"✗ {api_type.capitalize()}密钥 {masked_key} 测试失败: {e}")
+            name = key_config.get('name') if isinstance(key_config, dict) else None
+            display = name if name else masked_key
+            logger.error(f"✗ {api_type.capitalize()}密钥 {display} 测试失败: {e}")
             return False
     
     def process_files(self, files):
@@ -164,8 +170,14 @@ class NovelCondenser:
         
         return success_count, failed_files
     
-    def _process_files_concurrently(self, files, total_files):
-        """并发处理文件"""
+    def _process_files_concurrently(self, files, total_files, stop_event=None):
+        """并发处理文件
+
+        Args:
+            files: 待处理文件列表
+            total_files: 文件总数
+            stop_event: 可选的停止事件，用于外部请求中止处理
+        """
         success_count = 0
         failed_files = {}
         completed_count = 0
@@ -177,15 +189,18 @@ class NovelCondenser:
         all_keys_skipped = {"gemini": False, "openai": False}
         keys_skipped_lock = threading.Lock()
         
-        # 进度更新器线程
-        progress_stopped = threading.Event()
+        # 停止事件（支持外部传入）
+        stop_event = stop_event or threading.Event()
         
         # 处理函数
         def process_file(file_path, file_index):
             nonlocal success_count, completed_count
             
             # 检查是否应该停止
-            if progress_stopped.is_set():
+            if stop_event.is_set():
+                with lock:
+                    completed_count += 1
+                    failed_files[file_path] = 0
                 return False
                 
             # 检查是否要跳过处理
@@ -196,6 +211,9 @@ class NovelCondenser:
                     (self.api_type == "mixed" and all_keys_skipped["gemini"] and all_keys_skipped["openai"])
                 )
                 if skip_condition:
+                    with lock:
+                        completed_count += 1
+                        failed_files[file_path] = 0
                     return False
             
             # 处理单个文件
@@ -214,29 +232,90 @@ class NovelCondenser:
                 
             return status
         
+        # 计算有效并发度：不超过配置的workers，且不超过密钥能力
+        try:
+            effective_workers = int(self.workers)
+        except Exception:
+            effective_workers = 1
+        effective_workers = max(1, effective_workers)
+        try:
+            if self.api_type == "gemini" and self.gemini_key_manager:
+                effective_workers = min(effective_workers, max(1, self.gemini_key_manager.get_max_concurrency()))
+            elif self.api_type == "openai" and self.openai_key_manager:
+                effective_workers = min(effective_workers, max(1, self.openai_key_manager.get_max_concurrency()))
+            elif self.api_type == "mixed":
+                g = self.gemini_key_manager.get_max_concurrency() if self.gemini_key_manager else 0
+                o = self.openai_key_manager.get_max_concurrency() if self.openai_key_manager else 0
+                effective_workers = min(effective_workers, max(1, g + o if (g + o) > 0 else effective_workers))
+        except Exception:
+            pass
+        effective_workers = max(1, effective_workers)
+
         # 使用tqdm显示进度条
         from tqdm import tqdm
         with tqdm(total=total_files, desc="处理进度") as pbar:
             try:
-                # 使用ThreadPoolExecutor处理文件
-                with concurrent.futures.ThreadPoolExecutor(max_workers=self.workers) as executor:
-                    # 创建future到文件索引的映射
-                    futures = {executor.submit(process_file, file_path, i+1): i 
-                              for i, file_path in enumerate(files) 
-                              if not progress_stopped.is_set()}
-                    
-                    # 处理完成的future
-                    for future in concurrent.futures.as_completed(futures):
-                        # 更新进度条
-                        pbar.n = completed_count
-                        pbar.refresh()
-                        
-                        # 检查是否需要提前结束
-                        if progress_stopped.is_set():
-                            for f in futures:
+                # 使用ThreadPoolExecutor处理文件（分批提交，避免一次性提交全部任务）
+                with concurrent.futures.ThreadPoolExecutor(max_workers=effective_workers) as executor:
+                    futures = set()
+                    # 预填充任务，不超过有效并发数
+                    file_iter = ((idx + 1, path) for idx, path in enumerate(files))
+
+                    def submit_next_batch(num_to_submit=1):
+                        submitted = 0
+                        while submitted < num_to_submit and not stop_event.is_set():
+                            try:
+                                file_index, file_path = next(file_iter)
+                            except StopIteration:
+                                break
+                            futures.add(executor.submit(process_file, file_path, file_index))
+                            submitted += 1
+                        return submitted
+
+                    # 初始提交
+                    submit_next_batch(min(effective_workers, total_files))
+
+                    # 处理完成的future并滚动提交新任务
+                    while futures:
+                        # 使用wait而不是as_completed，避免因超时抛出异常
+                        done, _not_done = concurrent.futures.wait(
+                            futures,
+                            timeout=0.5,
+                            return_when=concurrent.futures.FIRST_COMPLETED,
+                        )
+                        made_progress = len(done) > 0
+
+                        for future in list(done):
+                            if future in futures:
+                                futures.remove(future)
+
+                            # 吞掉可能的异常，避免静默失败
+                            try:
+                                _ = future.result()
+                            except Exception as e:
+                                logger.error(f"并发任务执行异常: {e}")
+
+                            # 更新进度条
+                            pbar.n = completed_count
+                            pbar.refresh()
+
+                            if stop_event.is_set():
+                                break
+
+                            # 每完成一个任务，补提一个新任务
+                            submit_next_batch(1)
+
+                        if stop_event.is_set():
+                            # 取消未完成任务
+                            for f in list(futures):
                                 if not f.done():
                                     f.cancel()
                             break
+
+                        # 如果没有完成的任务（超时），也检查一次进度
+                        if not made_progress:
+                            pbar.n = completed_count
+                            pbar.refresh()
             
             except KeyboardInterrupt:
                 logger.warning("用户中断处理")
@@ -326,7 +405,22 @@ class NovelCondenser:
         # 选择API类型
         current_api_type = self._select_api_type(file_index) if self.api_type == "mixed" else self.api_type
         if self.api_type == "mixed":
-            logger.info(f"混合模式：为文件 {base_name} 选择 {current_api_type.upper()} API")
+            # 输出选择的API并尽量展示将要使用的密钥名称（从未被跳过的配置中挑选第一个）
+            display_name = None
+            try:
+                km = self.gemini_key_manager if current_api_type == "gemini" else self.openai_key_manager
+                if km and getattr(km, 'api_configs', None):
+                    for ac in km.api_configs:
+                        if hasattr(km, 'skipped_configs') and ac.get('_config_id') in km.skipped_configs:
+                            continue
+                        n = ac.get('name') or ''
+                        key_mask = (ac.get('key','')[:8] + '...') if ac.get('key') else ''
+                        display_name = n if n else key_mask
+                        break
+            except Exception:
+                pass
+            suffix = f"（{display_name}）" if display_name else ""
+            logger.info(f"混合模式：为文件 {base_name} 选择 {current_api_type.upper()} API{suffix}")
         
         # 调用API处理
         success, result = self._process_with_api(current_api_type, content, file_path)
@@ -695,8 +789,23 @@ def process_files_concurrently(file_paths, max_workers, api_type="gemini", force
     # 获取文件总数
     total_files = len(file_paths)
     
+    # 为GUI停止按钮暴露一个可设置的停止事件
+    stop_event = threading.Event()
+    try:
+        # 将事件挂在函数对象上，方便外部通过引用设置
+        process_files_concurrently.progress_stopped = stop_event
+    except Exception:
+        pass
+
     # 调用实例方法处理文件
-    return condenser._process_files_concurrently(file_paths, total_files)
+    try:
+        return condenser._process_files_concurrently(file_paths, total_files, stop_event=stop_event)
+    finally:
+        # 清理挂载的事件，避免影响后续调用
+        try:
+            delattr(process_files_concurrently, 'progress_stopped')
+        except Exception:
+            pass
 
 if __name__ == "__main__":
     main() 

@@ -329,8 +329,29 @@ def _process_content_in_chunks(content: str, api_type: str, api_key: str, redire
     
     # 如果内容在API处理范围内，直接处理
     if content_len <= MAX_API_INPUT_LENGTH:
-        return _process_content_with_api(content, api_type, api_key, redirect_url, model, 
-                                      False, 0, 0, custom_prompt_template)
+        display_label = _get_display_label_for_key(key_manager, api_key)
+        result = _process_content_with_api(
+            content,
+            api_type,
+            api_key,
+            redirect_url,
+            model,
+            False,
+            0,
+            0,
+            custom_prompt_template,
+            display_label,
+        )
+        # 关键：非分块路径也上报成功/失败，以驱动密钥冷却与恢复
+        if key_manager:
+            try:
+                if result:
+                    key_manager.report_success(api_key)
+                else:
+                    key_manager.report_error(api_key)
+            except Exception:
+                pass
+        return result
     
     # 内容太长，需要分块处理
     logger.info(f"内容长度({content_len}字)超过API限制，将分块处理")
@@ -385,9 +406,18 @@ def _process_content_in_chunks(content: str, api_type: str, api_key: str, redire
         logger.info(f"处理第 {i+1}/{total_chunks} 个块 ({len(chunk)}字)...")
         
         # 处理单个块，并传递自定义提示词模板
+        display_label = _get_display_label_for_key(key_manager, api_key)
         condensed_chunk = _process_chunk_with_retry(
-            chunk, api_type, api_key, redirect_url, model, 
-            i+1, total_chunks, key_manager, custom_prompt_template
+            chunk,
+            api_type,
+            api_key,
+            redirect_url,
+            model,
+            i + 1,
+            total_chunks,
+            key_manager,
+            custom_prompt_template,
+            display_label,
         )
         
         if condensed_chunk:
@@ -412,7 +442,8 @@ def _process_content_in_chunks(content: str, api_type: str, api_key: str, redire
 
 def _process_chunk_with_retry(chunk: str, api_type: str, api_key: str, redirect_url: str, model: str,
                              chunk_index: int, total_chunks: int, 
-                             key_manager: Optional[APIKeyManager] = None, custom_prompt_template: Optional[str] = None) -> Optional[str]:
+                             key_manager: Optional[APIKeyManager] = None, custom_prompt_template: Optional[str] = None,
+                             display_label: Optional[str] = None) -> Optional[str]:
     """处理单个块，带有重试逻辑
     
     Args:
@@ -436,8 +467,16 @@ def _process_chunk_with_retry(chunk: str, api_type: str, api_key: str, redirect_
         try:
             # 处理单个块，并传递自定义提示词模板
             condensed_chunk = _process_content_with_api(
-                chunk, api_type, api_key, redirect_url, model, 
-                True, chunk_index, total_chunks, custom_prompt_template
+                chunk,
+                api_type,
+                api_key,
+                redirect_url,
+                model,
+                True,
+                chunk_index,
+                total_chunks,
+                custom_prompt_template,
+                display_label,
             )
             
             if condensed_chunk:
@@ -477,7 +516,8 @@ def _process_chunk_with_retry(chunk: str, api_type: str, api_key: str, redirect_
 
 def _process_content_with_api(content: str, api_type: str, api_key: str, redirect_url: str, model: str, 
                              is_chunk: bool = False, chunk_index: int = 0, total_chunks: int = 0,
-                             custom_prompt_template: Optional[str] = None) -> Optional[str]:
+                             custom_prompt_template: Optional[str] = None,
+                             display_label: Optional[str] = None) -> Optional[str]:
     """通用的API内容处理函数
     
     Args:
@@ -536,7 +576,8 @@ def _process_content_with_api(content: str, api_type: str, api_key: str, redirec
         api_type=api_type,
         max_retries=max_retries,
         retry_delay=retry_delay,
-        timeout=timeout
+        timeout=timeout,
+        display_label=display_label,
     )
     
     if response_json:
@@ -548,12 +589,15 @@ def _process_content_with_api(content: str, api_type: str, api_key: str, redirec
             logger.warning(f"{api_type.capitalize()} API返回了空内容或无法识别的响应格式")
             # 尝试记录完整响应进行调试
             logger.debug(f"完整响应: {json.dumps(response_json)}")
+    else:
+        # 保持由调用方负责上报错误，避免重复计数
+        pass
     
     # 请求失败
     return None
 
 def _make_api_request(url: str, headers: Dict, data: Dict, api_type: str, max_retries: int = 3, 
-                     retry_delay: int = 5, timeout: int = 120) -> Optional[Dict]:
+                     retry_delay: int = 5, timeout: int = 120, display_label: Optional[str] = None) -> Optional[Dict]:
     """通用的API请求处理函数
     
     Args:
@@ -568,10 +612,17 @@ def _make_api_request(url: str, headers: Dict, data: Dict, api_type: str, max_re
     Returns:
         Optional[Dict]: API响应数据，请求失败则返回None
     """
-    for retry in range(max_retries):
+    attempt = 0
+    max_attempts = max_retries
+    extra_retry_granted = False
+
+    while attempt < max_attempts:
+        attempt += 1
         try:
             # 发送请求
-            logger.debug(f"发送{api_type.capitalize()} API请求 (尝试 {retry+1}/{max_retries})")
+            label = f"[{display_label}]" if display_label else ""
+            # 提升到info，以便默认日志级别可见所用密钥名称
+            logger.info(f"发送{api_type.capitalize()} API请求{label} (尝试 {attempt}/{max_attempts})")
             response = requests.post(url, headers=headers, json=data, timeout=timeout)
             
             # 检查响应状态码
@@ -579,37 +630,41 @@ def _make_api_request(url: str, headers: Dict, data: Dict, api_type: str, max_re
                 return response.json()
                 
             # 处理非200响应
-            logger.error(f"{api_type.capitalize()} API请求失败: HTTP {response.status_code}")
+            logger.error(f"{api_type.capitalize()} API请求失败{label}: HTTP {response.status_code}")
             
             # 尝试解析错误响应
             error_json = None
             try:
                 error_json = response.json()
-                logger.error(f"错误详情: {json.dumps(error_json)}")
+                logger.error(f"错误详情{label}: {json.dumps(error_json)}")
             except:
-                logger.error(f"响应内容: {response.text}")
+                logger.error(f"响应内容{label}: {response.text}")
                 
             # 处理配额超限错误，可能需要特殊等待
             if response.status_code == 429:
                 retry_delay_seconds = _get_retry_delay_for_rate_limit(error_json, api_type)
-                logger.warning(f"{api_type.capitalize()} API配额超限，将等待{retry_delay_seconds}秒后重试...")
+                logger.warning(f"{api_type.capitalize()} API配额超限{label}，将等待{retry_delay_seconds}秒后重试...")
                 time.sleep(retry_delay_seconds)
                 
                 # 如果是最后一次重试，给予一次额外机会
-                if retry == max_retries - 1:
-                    retry -= 1
+                if attempt == max_attempts and not extra_retry_granted:
+                    max_attempts += 1
+                    extra_retry_granted = True
+                    logger.warning(f"{api_type.capitalize()} API配额超限{label}，追加一次额外重试机会")
                 continue
                 
         except requests.exceptions.Timeout:
-            logger.warning(f"{api_type.capitalize()} API请求超时")
+            label = f"[{display_label}]" if display_label else ""
+            logger.warning(f"{api_type.capitalize()} API请求超时{label}")
             
         except Exception as e:
-            logger.error(f"{api_type.capitalize()}请求处理过程中发生错误: {e}")
+            label = f"[{display_label}]" if display_label else ""
+            logger.error(f"{api_type.capitalize()}请求处理过程中发生错误{label}: {e}")
             logger.debug(traceback.format_exc())
             
         # 只要不是最后一次尝试，就等待后重试
-        if retry < max_retries - 1:
-            sleep_time = _calculate_exponential_backoff(retry_delay, retry)
+        if attempt < max_attempts:
+            sleep_time = _calculate_exponential_backoff(retry_delay, attempt - 1)
             logger.debug(f"将在 {sleep_time} 秒后重试...")
             time.sleep(sleep_time)
         else:
@@ -656,6 +711,31 @@ def _calculate_exponential_backoff(base_delay: int, retry_count: int) -> int:
         int: 延迟秒数
     """
     return base_delay * (2 ** retry_count)
+
+def _get_display_label_for_key(key_manager: Optional[APIKeyManager], api_key: str) -> str:
+    """根据key_manager与api_key生成日志展示的标签（优先返回配置中的name）。"""
+    name = ""
+    key_value = api_key or ""
+    if key_manager is not None:
+        try:
+            cfg_id = getattr(key_manager._local, 'last_cfg_id', None)
+            if cfg_id:
+                for ac in getattr(key_manager, 'api_configs', []):
+                    if ac.get('_config_id') == cfg_id:
+                        name = ac.get('name') or ""
+                        key_value = ac.get('key', key_value)
+                        break
+            if not name:
+                # 兜底：直接通过key匹配
+                for ac in getattr(key_manager, 'api_configs', []):
+                    if ac.get('key') == api_key:
+                        name = ac.get('name') or ""
+                        key_value = ac.get('key', key_value)
+                        break
+        except Exception:
+            pass
+    key_mask = (key_value[:8] + '...') if key_value else ''
+    return name if name else key_mask
 
 def generate_novel_condenser_prompt(is_chunk: bool = False, chunk_index: int = 0, total_chunks: int = 0, content_length: int = 0, custom_prompt_template: Optional[str] = None) -> str:
     """生成小说内容压缩的提示词

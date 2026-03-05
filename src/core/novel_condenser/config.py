@@ -227,11 +227,19 @@ def _load_from_file(file_path: str) -> bool:
         # 加载Gemini API配置    
         if 'gemini_api' in config_data and isinstance(config_data['gemini_api'], list):
             GEMINI_API_CONFIG = config_data['gemini_api']
+            # 确保每项存在 name 字段
+            for item in GEMINI_API_CONFIG:
+                if 'name' not in item:
+                    item['name'] = ""
             logger.info(f"加载了 {len(GEMINI_API_CONFIG)} 个Gemini API密钥")
         
         # 加载OpenAI API配置
         if 'openai_api' in config_data and isinstance(config_data['openai_api'], list):
             OPENAI_API_CONFIG = config_data['openai_api']
+            # 确保每项存在 name 字段
+            for item in OPENAI_API_CONFIG:
+                if 'name' not in item:
+                    item['name'] = ""
             logger.info(f"加载了 {len(OPENAI_API_CONFIG)} 个OpenAI API密钥")
             
         # 加载max_rpm值（如果存在）
@@ -315,21 +323,25 @@ def create_config_template(config_path: Optional[str] = None) -> None:
         template = {
             "gemini_api": [
                 {
+                    "name": "",
                     "key": "你的gemini 密钥",
                     "redirect_url": "代理url 地址，可空。默认：https://generativelanguage.googleapis.com/v1beta/models",
                     "model": "模型，可空。默认：gemini-2.0-flash",
                     "rpm": 10
                 },{
+                    "name": "",
                     "key":"最简配置demo"
                 }
             ],
             "openai_api": [
                 {
+                    "name": "",
                     "key": "你的openai 密钥或其他一切兼容openai-api 格式的,如DeepSeek等",
                     "redirect_url": "代理url，可空。默认：https://api.openai.com/v1/chat/completions",
                     "model": "模型，可空。默认：gpt-3.5-turbo",
                     "rpm": 10
                 },{
+                    "name": "",
                     "key":"最简配置demo"
                 }
             ],
