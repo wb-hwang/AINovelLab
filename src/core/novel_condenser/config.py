@@ -150,6 +150,9 @@ def load_api_config(config_path: Optional[str] = None) -> bool:
     global MIN_CONDENSATION_RATIO, MAX_CONDENSATION_RATIO, TARGET_CONDENSATION_RATIO
     global LLM_GENERATION_PARAMS, PROMPT_TEMPLATES
     
+    if config_path:
+        return _load_from_file(config_path)
+
     # 首先尝试从项目全局配置加载
     if project_config:
         # 加载Gemini API配置
@@ -189,10 +192,6 @@ def load_api_config(config_path: Optional[str] = None) -> bool:
         # 如果至少加载了一种API配置，则返回成功
         if len(GEMINI_API_CONFIG) > 0 or len(OPENAI_API_CONFIG) > 0:
             return True
-    
-    # 如果指定了配置文件路径，直接使用
-    if config_path:
-        return _load_from_file(config_path)
     
     # 否则尝试从可能的路径列表中加载
     for path in get_possible_config_paths():
@@ -367,6 +366,83 @@ def create_config_template(config_path: Optional[str] = None) -> None:
         logger.info("请编辑此文件并填入您的API密钥")
     except Exception as e:
         logger.error(f"创建配置文件模板出错: {e}")
+
+
+def _normalize_api_config_list(api_configs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """规范化 API 配置列表，确保结构稳定。"""
+    normalized_configs: List[Dict[str, Any]] = []
+    for item in api_configs or []:
+        if not isinstance(item, dict):
+            continue
+        normalized_item = dict(item)
+        if "name" not in normalized_item:
+            normalized_item["name"] = ""
+        normalized_configs.append(normalized_item)
+    return normalized_configs
+
+
+def _sync_runtime_api_configs(
+    gemini_api: List[Dict[str, Any]],
+    openai_api: List[Dict[str, Any]],
+) -> None:
+    """同步运行时内存中的 API 配置。"""
+    normalized_gemini = _normalize_api_config_list(gemini_api)
+    normalized_openai = _normalize_api_config_list(openai_api)
+
+    GEMINI_API_CONFIG[:] = normalized_gemini
+    OPENAI_API_CONFIG[:] = normalized_openai
+
+    if project_config:
+        if hasattr(project_config, "GEMINI_API_CONFIG") and isinstance(project_config.GEMINI_API_CONFIG, list):
+            project_config.GEMINI_API_CONFIG[:] = [dict(item) for item in normalized_gemini]
+        else:
+            project_config.GEMINI_API_CONFIG = [dict(item) for item in normalized_gemini]
+
+        if hasattr(project_config, "OPENAI_API_CONFIG") and isinstance(project_config.OPENAI_API_CONFIG, list):
+            project_config.OPENAI_API_CONFIG[:] = [dict(item) for item in normalized_openai]
+        else:
+            project_config.OPENAI_API_CONFIG = [dict(item) for item in normalized_openai]
+
+
+def save_api_config_lists(
+    gemini_api: List[Dict[str, Any]],
+    openai_api: List[Dict[str, Any]],
+    config_path: Optional[str] = None,
+) -> bool:
+    """保存 API 配置列表，并同步内存中的运行时配置。"""
+    target_path = config_path or get_config_file_path()
+
+    try:
+        config_data: Dict[str, Any] = {
+            "gemini_api": [],
+            "openai_api": [],
+            "max_rpm": DEFAULT_MAX_RPM,
+        }
+        if os.path.exists(target_path):
+            with open(target_path, 'r', encoding='utf-8') as f:
+                config_data = json.load(f)
+        elif "max_rpm" not in config_data:
+            config_data["max_rpm"] = DEFAULT_MAX_RPM
+
+        normalized_gemini = _normalize_api_config_list(gemini_api)
+        normalized_openai = _normalize_api_config_list(openai_api)
+
+        config_data["gemini_api"] = normalized_gemini
+        config_data["openai_api"] = normalized_openai
+        if "max_rpm" not in config_data or not isinstance(config_data["max_rpm"], int):
+            config_data["max_rpm"] = DEFAULT_MAX_RPM
+
+        os.makedirs(os.path.dirname(target_path) or ".", exist_ok=True)
+        with open(target_path, 'w', encoding='utf-8') as f:
+            json.dump(config_data, f, ensure_ascii=False, indent=4)
+
+        _sync_runtime_api_configs(normalized_gemini, normalized_openai)
+        logger.info(f"已保存 API 配置到文件: {target_path}")
+        return True
+    except Exception as e:
+        logger.error(f"保存 API 配置失败: {e}")
+        return False
+
 
 def save_config_to_file(custom_prompt: str) -> bool:
     """将自定义提示词保存到配置文件

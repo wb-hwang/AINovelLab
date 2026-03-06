@@ -5,31 +5,52 @@
 """
 
 import os
-from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, 
-                          QFileDialog, QMessageBox, QProgressBar, QTextEdit, 
-                          QGroupBox, QLineEdit, QFormLayout, QCheckBox)
+from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
+                          QFileDialog, QMessageBox, QProgressBar, QTextEdit,
+                          QGroupBox, QLineEdit, QFormLayout, QCheckBox, QFrame, QSplitter)
 from PyQt5.QtCore import Qt
-from PyQt5.QtGui import QFont, QTextCursor
+from PyQt5.QtGui import QFont
 
 from .worker import WorkerThread
+from .ui_components import (
+    create_stat_card,
+    set_label_state,
+    show_completion_dialog,
+    show_error_message,
+    style_button,
+)
 
 class TxtToEpubTab(QWidget):
     """TXT转EPUB标签页"""
     
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.init_ui()
         self.worker_thread = None
         self.txt_files = []
         self.book_base_dir = ""  # 保存书名目录路径
+        self.init_ui()
     
     def init_ui(self):
         """初始化用户界面"""
         # 创建布局
         main_layout = QVBoxLayout()
+        main_layout.setContentsMargins(14, 14, 14, 14)
+        main_layout.setSpacing(10)
+
+        summary_layout = QHBoxLayout()
+        summary_layout.setSpacing(8)
+        self.summary_source_card = create_stat_card("输入目录", "尚未选择")
+        self.summary_chapter_card = create_stat_card("章节数量", "0 个")
+        self.summary_title_card = create_stat_card("书籍标题", "未填写")
+        self.summary_output_card = create_stat_card("输出文件", "尚未设置")
+        summary_layout.addWidget(self.summary_source_card, 3)
+        summary_layout.addWidget(self.summary_chapter_card, 1)
+        summary_layout.addWidget(self.summary_title_card, 2)
+        summary_layout.addWidget(self.summary_output_card, 3)
+        main_layout.addLayout(summary_layout)
         
-        # 创建左右分栏布局
-        split_layout = QHBoxLayout()
+        content_splitter = QSplitter(Qt.Horizontal)
+        content_splitter.setChildrenCollapsible(False)
         
         # 左侧面板 - 控制区域
         left_panel = QVBoxLayout()
@@ -43,6 +64,7 @@ class TxtToEpubTab(QWidget):
         self.folder_path_edit.setPlaceholderText("请选择TXT文件所在文件夹...")
         
         browse_button = QPushButton("浏览...")
+        style_button(browse_button, "secondary")
         browse_button.clicked.connect(self.browse_folder)
         
         folder_layout.addWidget(self.folder_path_edit)
@@ -55,6 +77,7 @@ class TxtToEpubTab(QWidget):
         
         self.title_edit = QLineEdit()
         self.title_edit.setPlaceholderText("输入书籍标题...")
+        self.title_edit.textChanged.connect(self.refresh_summary)
         
         self.author_edit = QLineEdit()
         self.author_edit.setPlaceholderText("输入作者名...")
@@ -64,6 +87,7 @@ class TxtToEpubTab(QWidget):
         self.output_path_edit.setPlaceholderText("EPUB输出位置...")
         
         output_browse_button = QPushButton("浏览...")
+        style_button(output_browse_button, "secondary")
         output_browse_button.clicked.connect(self.browse_output)
         
         output_layout = QHBoxLayout()
@@ -82,6 +106,7 @@ class TxtToEpubTab(QWidget):
         
         self.progress_bar = QProgressBar()
         self.status_label = QLabel("就绪")
+        set_label_state(self.status_label, "muted")
         
         status_layout.addWidget(self.progress_bar)
         status_layout.addWidget(self.status_label)
@@ -93,13 +118,15 @@ class TxtToEpubTab(QWidget):
         
         self.files_text = QTextEdit()
         self.files_text.setReadOnly(True)
+        self.files_text.setPlaceholderText("选择 TXT 目录后，这里会显示准备合并的章节清单。")
         
         files_layout.addWidget(self.files_text)
         files_group.setLayout(files_layout)
-        
+
         # 操作按钮
         button_layout = QHBoxLayout()
-        self.start_button = QPushButton("生成EPUB")
+        self.start_button = QPushButton("开始生成")
+        style_button(self.start_button, "primary")
         self.start_button.clicked.connect(self.start_merging)
         
         button_layout.addStretch()
@@ -108,12 +135,13 @@ class TxtToEpubTab(QWidget):
         # 将控制组件添加到左侧面板
         left_panel.addWidget(folder_group)
         left_panel.addWidget(epub_group)
-        left_panel.addWidget(status_group)
         left_panel.addWidget(files_group)
         left_panel.addLayout(button_layout)
-        
+
         # 右侧面板 - 日志区域
         right_panel = QVBoxLayout()
+        right_panel.setSpacing(8)
+        right_panel.addWidget(status_group)
         
         # 日志显示区域
         log_group = QGroupBox("运行日志")
@@ -123,6 +151,7 @@ class TxtToEpubTab(QWidget):
         self.log_text.setReadOnly(True)
         self.log_text.setFont(QFont("Courier New", 9))
         self.log_text.setLineWrapMode(QTextEdit.NoWrap)  # 禁用自动换行
+        self.log_text.setPlaceholderText("运行后会显示合并过程、输出路径与异常提示。")
         
         # 在底部添加清除日志按钮和自动滚动选项
         log_buttons_layout = QHBoxLayout()
@@ -136,6 +165,7 @@ class TxtToEpubTab(QWidget):
         self.line_wrap_checkbox.stateChanged.connect(self.toggle_line_wrap)
         
         self.clear_log_button = QPushButton("清除日志")
+        style_button(self.clear_log_button, "ghost")
         self.clear_log_button.clicked.connect(self.clear_log)
         
         log_buttons_layout.addWidget(self.auto_scroll_checkbox)
@@ -148,16 +178,59 @@ class TxtToEpubTab(QWidget):
         log_group.setLayout(log_layout)
         
         # 将日志组件添加到右侧面板
-        right_panel.addWidget(log_group)
-        
-        # 将左右面板添加到分栏布局
-        split_layout.addLayout(left_panel, 1)  # 比例1
-        split_layout.addLayout(right_panel, 1)  # 比例1
+        right_panel.addWidget(log_group, 1)
+
+        left_frame = QFrame()
+        left_frame.setObjectName("left_frame")
+        left_frame.setLayout(left_panel)
+
+        right_frame = QFrame()
+        right_frame.setObjectName("right_frame")
+        right_frame.setLayout(right_panel)
+
+        content_splitter.addWidget(left_frame)
+        content_splitter.addWidget(right_frame)
+        content_splitter.setStretchFactor(0, 4)
+        content_splitter.setStretchFactor(1, 5)
+        content_splitter.setSizes([470, 630])
         
         # 将分栏布局添加到主布局
-        main_layout.addLayout(split_layout)
+        main_layout.addWidget(content_splitter, 1)
         
         self.setLayout(main_layout)
+        self.refresh_summary()
+
+    def refresh_summary(self):
+        """刷新顶部摘要信息。"""
+        full_source_path = self.folder_path_edit.text().strip()
+        full_output_path = self.output_path_edit.text().strip()
+        self._set_stat_value(
+            self.summary_source_card,
+            self._compact_path(full_source_path, "尚未选择"),
+            full_source_path or None,
+        )
+        self._set_stat_value(self.summary_chapter_card, f"{len(self.txt_files)} 个")
+        self._set_stat_value(self.summary_title_card, self.title_edit.text().strip() or "未填写")
+        self._set_stat_value(
+            self.summary_output_card,
+            self._compact_path(full_output_path, "尚未设置"),
+            full_output_path or None,
+        )
+
+    def _set_stat_value(self, card: QFrame, text: str, tooltip: str | None = None):
+        value_label = card.findChild(QLabel, "statCardValue")
+        if value_label is not None:
+            value_label.setText(text)
+            value_label.setToolTip(tooltip or "")
+        card.setToolTip(tooltip or "")
+
+    def _compact_path(self, path: str, fallback: str) -> str:
+        if not path:
+            return fallback
+        normalized = path.replace("\\", "/")
+        if len(normalized) <= 42:
+            return normalized
+        return f".../{'/'.join(normalized.split('/')[-3:])}"
     
     def add_log(self, message):
         """添加日志到日志显示区域"""
@@ -189,6 +262,7 @@ class TxtToEpubTab(QWidget):
             # 设置EPUB输出路径在书名目录下
             output_epub_path = os.path.join(self.book_base_dir, f"{book_name}.epub")
             self.output_path_edit.setText(output_epub_path)
+            self.refresh_summary()
             self.add_log(f"设置EPUB输出路径: {output_epub_path}")
     
     def browse_folder(self):
@@ -215,6 +289,7 @@ class TxtToEpubTab(QWidget):
                 # 设置EPUB输出路径在书名目录下
                 output_epub_path = os.path.join(parent_dir, f"{book_name}.epub")
                 self.output_path_edit.setText(output_epub_path)
+                self.refresh_summary()
                 self.add_log(f"设置EPUB输出路径: {output_epub_path}")
     
     def browse_output(self):
@@ -227,6 +302,7 @@ class TxtToEpubTab(QWidget):
             if not file_path.lower().endswith('.epub'):
                 file_path += '.epub'
             self.output_path_edit.setText(file_path)
+            self.refresh_summary()
             
             # 添加日志
             self.add_log(f"已设置EPUB输出路径: {file_path}")
@@ -245,6 +321,9 @@ class TxtToEpubTab(QWidget):
         
         # 更新文件列表显示
         self.files_text.setText(files_text)
+        if not self.txt_files:
+            self.files_text.setPlainText("当前目录下未发现 TXT 文件。\n请确认脱水结果目录是否正确。")
+        self.refresh_summary()
         
         # 添加日志
         self.add_log(f"已加载{len(self.txt_files)}个TXT文件")
@@ -291,8 +370,11 @@ class TxtToEpubTab(QWidget):
         
         # 更新UI状态
         self.start_button.setEnabled(False)
+        self.start_button.setText("生成中...")
         self.progress_bar.setValue(0)
         self.status_label.setText("正在生成EPUB...")
+        set_label_state(self.status_label, "working")
+        self.refresh_summary()
         
         # 添加开始日志
         self.add_log(f"开始生成EPUB，标题: {title}，作者: {author}")
@@ -306,19 +388,25 @@ class TxtToEpubTab(QWidget):
         """更新进度条和状态标签"""
         self.progress_bar.setValue(value)
         self.status_label.setText(message)
+        self.refresh_summary()
     
     def operation_complete(self, success, message):
         """操作完成的处理函数"""
         self.start_button.setEnabled(True)
+        self.start_button.setText("开始生成")
         
         if success:
             self.status_label.setText("EPUB生成完成")
+            set_label_state(self.status_label, "success")
+            self.refresh_summary()
             self.add_log("EPUB生成成功完成")
-            QMessageBox.information(self, "操作完成", message)
+            show_completion_dialog(self, "生成完成", message)
         else:
             self.status_label.setText("EPUB生成失败")
+            set_label_state(self.status_label, "error")
+            self.refresh_summary()
             self.add_log(f"EPUB生成失败: {message}")
-            QMessageBox.critical(self, "操作失败", message)
+            show_error_message(self, "生成失败", message)
             
     def toggle_line_wrap(self, state):
         """切换自动换行选项"""

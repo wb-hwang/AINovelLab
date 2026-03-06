@@ -51,3 +51,4 @@ Thumbs.db
 # *.txt
 # *.pdf
 AINovelLab.spec
+.codex/*

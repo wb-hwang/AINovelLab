@@ -12,6 +12,13 @@ from src.core.novel_condenser import config
 from src.core.novel_condenser.config import save_config_to_file
 
 from .worker import WorkerThread
+from .ui_components import (
+    create_page_header,
+    set_label_state,
+    show_error_message,
+    show_info_message,
+    style_button,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -19,7 +26,27 @@ class PromptEditDialog(QDialog):
     """提示词编辑和测试对话框"""
     
     # 类常量
-    DEFAULT_PROMPT = '你是一位专业的小说内容整理与改写专家。你的任务是将下面的小说内容（原文 {original_count}字）调整为一个更简洁的版本。调整后版本的字数应在 {min_count} 字到 {max_count} 字之间，请务必严格控制产出字数在该范围内。\n\n请严格遵循以下要求：\n\n主线完整：完整保留故事的主线情节与所有关键转折点。不允许遗漏任何重要剧情推进环节。\n人物塑造：保留主要人物性格、形象发展至关重要的对话、内心活动和互动细节。\n环境氛围：保留对理解世界观、故事背景、气氛营造有核心作用的环境描写与关键细节（但避免无关冗余描写）。\n重要配角与线索：不遗漏任何对情节发展有显著影响的次要人物和叙事线索。\n风格连贯流畅：确保压缩后的文本连贯、流畅，逻辑清楚，尽量保持原作风格和叙事调性。\n动态回补机制：初步整理完成后，请统计自己整理后文本的字数。如果字数低于目标下限 {min_count}，请回溯补充之前可能略去的次要情节、气氛描写、对主配角的心理刻画、对话或有助主旨细节，直至内容字数达到要求。\n禁止输出范围外字数：不允许输出低于 {min_count}或高于 {max_count} 字的文本。\n\n输出格式与注意事项：\n直接输出脱水压缩后的文本本身，不要添加任何前言、说明、评论、总结、序号或标题。\n如果整理后确实已到目标范围上限，但仍有部分细节未能保留，在不影响主线流畅的前提下可以适当取舍，但必须优先保障上述 1-5 点。'
+    DEFAULT_PROMPT = '''你是一位专业的小说内容压缩改写专家。请将输入小说正文压缩为“脱水版正文”。
+
+要求：
+1. 在严格忠于原文事实、人物关系、事件因果和叙事基调的前提下压缩改写。
+2. 不得新增原文不存在的剧情、设定、人物动机、人物关系、事件结果或细节。
+3. 不得篡改原文事实，不得写错境界、功法、法宝、宗门、承诺、条件和人物发言归属。
+4. 不得把正文写成剧情简介、提纲、总结或分点概述，必须写成连贯自然的小说正文。
+5. 不得为凑字数重复表达同一信息，不得出现机械复述、近义反复或空转句子。
+6. 必须保留主线剧情、关键转折、重要人物变化、关键对话、重要线索与必要背景信息。
+7. 可压缩重复描写、重复心理铺垫、冗余修饰、次要环境描写和对主线作用较弱的枝节。
+
+字数要求：
+- 原文长度：{original_count}字
+- 输出长度必须严格控制在 {min_count}—{max_count} 字之间
+- 若偏短，优先补关键对话、关键心理、关键动机和关键衔接
+- 若偏长，优先删重复信息、次要铺陈和非关键细节
+- 当字数与细节冲突时，优先保证：主线完整 > 关键转折 > 人物塑造 > 重要线索 > 文风氛围
+
+输出要求：
+只输出压缩后的正文，不要输出任何说明、标题、序号、总结、注释或字数统计。
+    '''
     MAX_FILES = 50  # 限制最多显示的文件数量
     
     def __init__(self, txt_files, parent=None):
@@ -38,6 +65,14 @@ class PromptEditDialog(QDialog):
     def init_ui(self):
         """初始化用户界面"""
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(14)
+
+        layout.addWidget(create_page_header(
+            "提示词调整",
+            "在不影响主流程配置的前提下，快速试验压缩提示词、比例区间与单章测试结果。",
+            [("单次测试", "info"), ("即时回写配置", "success")]
+        ))
         
         # 创建提示词编辑区
         prompt_layout = QVBoxLayout()
@@ -46,6 +81,7 @@ class PromptEditDialog(QDialog):
         header.addStretch()
         
         reset_btn = QPushButton("重置")
+        style_button(reset_btn, "ghost")
         reset_btn.setToolTip("重置为默认提示词")
         reset_btn.clicked.connect(self.reset_prompt)
         header.addWidget(reset_btn)
@@ -60,7 +96,7 @@ class PromptEditDialog(QDialog):
         
         # 变量信息区
         var_info = QLabel("提示词模板中可用变量: {original_count}=原文字数, {min_count}=最小目标字数, {max_count}=最大目标字数")
-        var_info.setStyleSheet("color: #555555; font-style: italic; padding-left: 5px;")
+        var_info.setObjectName("mutedMeta")
         var_info.setWordWrap(True)
         layout.addWidget(var_info)
         
@@ -77,17 +113,21 @@ class PromptEditDialog(QDialog):
             layout.addLayout(chapter_layout)
         
         # API测试区
-        test_layout = QHBoxLayout()
-        test_layout.addWidget(QLabel("选择API密钥:"))
+        test_layout = QVBoxLayout()
+        test_layout.setSpacing(8)
+
+        key_layout = QHBoxLayout()
+        key_layout.addWidget(QLabel("选择API密钥:"))
         self.key_combo = QComboBox()
         self.populate_key_combo()
-        test_layout.addWidget(self.key_combo)
-        test_layout.addSpacing(15)
-        
+        self.key_combo.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
+        self.key_combo.setMinimumContentsLength(20)
+        key_layout.addWidget(self.key_combo, 1)
+        test_layout.addLayout(key_layout)
+
         # 压缩比例设置
-        ratio_layout = QVBoxLayout()
-        ratio_control = QHBoxLayout()
-        ratio_control.addWidget(QLabel("测试压缩比:"))
+        ratio_layout = QHBoxLayout()
+        ratio_layout.addWidget(QLabel("测试压缩比:"))
         
         self.test_min_ratio_spin = QSpinBox()
         self.test_min_ratio_spin.setRange(1, 99)
@@ -101,22 +141,21 @@ class PromptEditDialog(QDialog):
         self.test_max_ratio_spin.setSuffix("%")
         self.test_max_ratio_spin.valueChanged.connect(self.update_target_count_display)
         
-        ratio_control.addWidget(self.test_min_ratio_spin)
-        ratio_control.addWidget(QLabel("-"))
-        ratio_control.addWidget(self.test_max_ratio_spin)
-        ratio_control.addStretch(1)
-        
-        ratio_layout.addLayout(ratio_control)
+        ratio_layout.addWidget(self.test_min_ratio_spin)
+        ratio_layout.addWidget(QLabel("-"))
+        ratio_layout.addWidget(self.test_max_ratio_spin)
         
         self.target_count_label = QLabel("目标字数范围: （请先输入原文）")
-        self.target_count_label.setStyleSheet("color: #555555; font-style: italic;")
-        ratio_layout.addWidget(self.target_count_label)
-        
-        test_layout.addLayout(ratio_layout)
+        set_label_state(self.target_count_label, "muted")
+        ratio_layout.addSpacing(10)
+        ratio_layout.addWidget(self.target_count_label, 1)
         
         self.test_button = QPushButton("单次脱水测试")
+        style_button(self.test_button, "primary")
         self.test_button.clicked.connect(self.test_condense)
-        test_layout.addWidget(self.test_button)
+        ratio_layout.addWidget(self.test_button)
+        
+        test_layout.addLayout(ratio_layout)
         
         # 如果没有API密钥，禁用测试按钮
         if self.key_combo.count() == 0 or self.key_combo.itemData(0) is None:
@@ -141,6 +180,7 @@ class PromptEditDialog(QDialog):
         condensed_layout = QVBoxLayout()
         self.condensed_text = QTextEdit()
         self.condensed_text.setReadOnly(True)
+        self.condensed_text.setPlaceholderText("测试完成后，这里会显示脱水结果与字数变化。")
         condensed_layout.addWidget(self.condensed_text)
         condensed_group.setLayout(condensed_layout)
         
@@ -152,7 +192,16 @@ class PromptEditDialog(QDialog):
         
         # 状态和按钮
         self.status_label = QLabel("就绪")
+        set_label_state(self.status_label, "muted")
         button_box = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
+        save_button = button_box.button(QDialogButtonBox.Save)
+        cancel_button = button_box.button(QDialogButtonBox.Cancel)
+        if save_button:
+            save_button.setText("保存提示词")
+            style_button(save_button, "primary")
+        if cancel_button:
+            cancel_button.setText("取消")
+            style_button(cancel_button, "ghost")
         button_box.accepted.connect(self.save_prompt)
         button_box.rejected.connect(self.reject)
         
@@ -164,10 +213,11 @@ class PromptEditDialog(QDialog):
     
     def set_ui_enabled(self, enabled=True):
         """统一设置UI控件的启用状态"""
-        self.test_button.setEnabled(enabled)
+        has_key = self.key_combo.count() > 0 and self.key_combo.itemData(0) is not None
+        self.test_button.setEnabled(enabled and has_key)
         self.prompt_edit.setEnabled(enabled)
         self.original_text.setEnabled(enabled)
-        self.key_combo.setEnabled(enabled and (self.key_combo.count() > 0 and self.key_combo.itemData(0) is not None))
+        self.key_combo.setEnabled(enabled and has_key)
         self.test_min_ratio_spin.setEnabled(enabled)
         self.test_max_ratio_spin.setEnabled(enabled)
     
@@ -191,16 +241,20 @@ class PromptEditDialog(QDialog):
         
         # 添加Gemini API密钥
         if hasattr(config, 'GEMINI_API_CONFIG') and config.GEMINI_API_CONFIG:
-            for i, _ in enumerate(config.GEMINI_API_CONFIG):
+            for i, api_config in enumerate(config.GEMINI_API_CONFIG):
                 key_id = f"gemini_{i+1}"
-                display_name = f"Gemini #{i+1}" + (" ✓" if key_id in self.successful_keys else "")
+                config_name = (api_config.get("name") or "").strip() if isinstance(api_config, dict) else ""
+                base_name = config_name or f"Gemini #{i+1}"
+                display_name = base_name + (" ✓" if key_id in self.successful_keys else "")
                 api_keys.append((display_name, {"type": "gemini", "index": i}))
         
         # 添加OpenAI API密钥
         if hasattr(config, 'OPENAI_API_CONFIG') and config.OPENAI_API_CONFIG:
-            for i, _ in enumerate(config.OPENAI_API_CONFIG):
+            for i, api_config in enumerate(config.OPENAI_API_CONFIG):
                 key_id = f"openai_{i+1}"
-                display_name = f"OpenAI #{i+1}" + (" ✓" if key_id in self.successful_keys else "")
+                config_name = (api_config.get("name") or "").strip() if isinstance(api_config, dict) else ""
+                base_name = config_name or f"OpenAI #{i+1}"
+                display_name = base_name + (" ✓" if key_id in self.successful_keys else "")
                 api_keys.append((display_name, {"type": "openai", "index": i}))
         
         # 填充下拉框
@@ -211,7 +265,8 @@ class PromptEditDialog(QDialog):
         else:
             self.key_combo.addItem("无可用API密钥", None)
             self.key_combo.setEnabled(False)
-            self.test_button.setEnabled(False)
+            if hasattr(self, "test_button"):
+                self.test_button.setEnabled(False)
     
     def load_chapter_content(self, file_path=None):
         """加载章节内容"""
@@ -237,7 +292,7 @@ class PromptEditDialog(QDialog):
     def reset_prompt(self):
         """重置提示词为默认值"""
         self.prompt_edit.setText(self.DEFAULT_PROMPT)
-        QMessageBox.information(self, "提示", "提示词已重置为默认值")
+        show_info_message(self, "已重置", "提示词已恢复为默认模板。")
     
     def test_condense(self):
         """使用当前提示词进行单次脱水测试"""
@@ -276,6 +331,7 @@ class PromptEditDialog(QDialog):
         
         # 开始处理
         self.status_label.setText("正在处理中...")
+        set_label_state(self.status_label, "working")
         self.set_ui_enabled(False)
         self.condensed_text.clear()
         
@@ -327,6 +383,7 @@ class PromptEditDialog(QDialog):
             
         # 更新状态显示
         self.status_label.setText(" | ".join(status_parts))
+        set_label_state(self.status_label, "success")
         
         # 检查异常比例
         if original_chars > 0 and condensed_chars > 0 and (ratio < 5 or ratio > 200):
@@ -350,8 +407,9 @@ class PromptEditDialog(QDialog):
     
     def on_test_error(self, error_message):
         """测试出错时的回调函数"""
-        QMessageBox.critical(self, "测试失败", f"脱水测试失败: {error_message}")
+        show_error_message(self, "测试失败", f"脱水测试失败：{error_message}")
         self.status_label.setText(f"测试失败: {error_message}")
+        set_label_state(self.status_label, "error")
         self.set_ui_enabled(True)
     
     def save_prompt(self):
@@ -383,10 +441,13 @@ class PromptEditDialog(QDialog):
     def show_save_result(self, success):
         """显示保存结果消息"""
         title, msg = (
-            ("保存成功", "提示词已更新并保存到配置文件，将用于后续的脱水处理") if success else
-            ("保存警告", "提示词已更新但保存到配置文件失败，仅在本次会话中有效")
+            ("保存成功", "提示词已更新并写入配置文件，后续脱水任务会直接使用新模板。") if success else
+            ("保存提醒", "提示词已在当前会话中更新，但写入配置文件失败。")
         )
-        (QMessageBox.information if success else QMessageBox.warning)(self, title, msg)
+        if success:
+            show_info_message(self, title, msg)
+        else:
+            QMessageBox.warning(self, title, msg)
 
     def update_target_count_display(self):
         """更新目标字数范围显示"""
@@ -398,8 +459,10 @@ class PromptEditDialog(QDialog):
             min_count = int(original_count * min_ratio / 100)
             max_count = int(original_count * max_ratio / 100)
             self.target_count_label.setText(f"目标字数范围: {min_count} - {max_count}字 (原文{original_count}字)")
+            set_label_state(self.target_count_label, "muted")
         else:
             self.target_count_label.setText("目标字数范围: （请先输入原文）")
+            set_label_state(self.target_count_label, "muted")
 
     def prompt_preview(self):
         """返回当前提示词的预览"""

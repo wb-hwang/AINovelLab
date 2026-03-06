@@ -9,7 +9,7 @@ import logging
 from PyQt5.QtWidgets import (QMainWindow, QTabWidget, QStatusBar,
                             QVBoxLayout, QWidget, QLabel, QHBoxLayout, QFrame)
 from PyQt5.QtCore import QSize, pyqtSignal, Qt
-from PyQt5.QtGui import QFont, QIcon, QColor, QPalette
+from PyQt5.QtGui import QFont
 
 from src.version import get_version_string
 
@@ -95,13 +95,13 @@ class MainWindow(QMainWindow):
         """初始化用户界面"""
         # 设置窗口标题和大小
         self.setWindowTitle(VERSION_STRING)
-        self.setMinimumSize(900, 650)
+        self.setMinimumSize(1040, 680)
         
         # 创建中央部件和主布局
         central_widget = QWidget()
         central_widget.setObjectName("centralWidget")
         main_layout = QVBoxLayout(central_widget)
-        main_layout.setContentsMargins(10, 10, 10, 10)
+        main_layout.setContentsMargins(12, 12, 12, 10)
         main_layout.setSpacing(10)
         
         # 创建标签页控件
@@ -109,6 +109,7 @@ class MainWindow(QMainWindow):
         self.tabs.setObjectName("mainTabs")
         self.tabs.setDocumentMode(True)  # 使用更现代的文档模式外观
         self.tabs.setTabPosition(QTabWidget.North)
+        self.tabs.setMovable(False)
         
         # 创建五个标签页
         self.home_tab = HomeTab()
@@ -130,7 +131,7 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self.api_test_tab, get_icon('test'), "API测试")
         
         # 设置标签页图标大小
-        self.tabs.setIconSize(QSize(20, 20))
+        self.tabs.setIconSize(QSize(18, 18))
         
         # 添加标签页控件到主布局
         main_layout.addWidget(self.tabs)

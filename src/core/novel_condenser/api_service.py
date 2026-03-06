@@ -592,7 +592,7 @@ def _process_content_with_api(content: str, api_type: str, api_key: str, redirec
     return None
 
 def _make_api_request(url: str, headers: Dict, data: Dict, api_type: str, max_retries: int = 3, 
-                     retry_delay: int = 5, timeout: int = 120, display_label: Optional[str] = None) -> Optional[Dict]:
+                     retry_delay: int = 5, timeout: Union[int, Tuple[int, int]] = 120, display_label: Optional[str] = None) -> Optional[Dict]:
     """通用的API请求处理函数
     
     Args:
@@ -602,7 +602,7 @@ def _make_api_request(url: str, headers: Dict, data: Dict, api_type: str, max_re
         api_type: API类型，"gemini"或"openai"
         max_retries: 最大重试次数
         retry_delay: 基础重试延迟（秒）
-        timeout: 请求超时时间（秒）
+        timeout: 请求超时时间（秒），或(connect_timeout, read_timeout)
     
     Returns:
         Optional[Dict]: API响应数据，请求失败则返回None
@@ -667,6 +667,39 @@ def _make_api_request(url: str, headers: Dict, data: Dict, api_type: str, max_re
     
     # 所有重试都失败
     return None
+
+
+def _build_test_request_data(api_type: str, model: str, content: str) -> Dict:
+    """构建 API 测试专用请求体。"""
+    if api_type == "gemini":
+        return {
+            "contents": [
+                {
+                    "parts": [
+                        {"text": "你正在执行接口可用性检测。请直接回复“ok”。"},
+                        {"text": content},
+                    ]
+                }
+            ],
+            "generationConfig": {
+                "temperature": 0,
+                "topK": 1,
+                "topP": 1,
+                "maxOutputTokens": 32,
+                "responseMimeType": "text/plain",
+            },
+        }
+
+    return {
+        "model": model,
+        "messages": [
+            {"role": "system", "content": "你正在执行接口可用性检测。请直接回复“ok”。"},
+            {"role": "user", "content": content},
+        ],
+        "temperature": 0,
+        "max_tokens": 32,
+        "top_p": 1,
+    }
 
 def _get_retry_delay_for_rate_limit(error_json: Optional[Dict], api_type: str) -> int:
     """获取配额超限情况下的重试延迟时间
@@ -1018,14 +1051,50 @@ def test_api_key(api_type: str, api_config: Dict[str, Any]) -> Tuple[bool, str]:
     if api_type not in ("gemini", "openai"):
         return False, f"不支持的API类型: {api_type}"
 
-    test_content = "你好，这是API测试消息。请用一句话回复。"
+    test_content = "你好，这是API测试消息。"
 
     try:
-        # 用单条配置创建临时 key_manager，复用限流/跳过逻辑（不污染全局 manager）。
-        km = APIKeyManager([api_config], config.DEFAULT_MAX_RPM)
-        func = condense_novel_gemini if api_type == "gemini" else condense_novel_openai
-        result = func(test_content, api_config, km)
-        if result:
+        api_key = api_config.get("key", "")
+        if not api_key:
+            return False, "API Key 为空"
+
+        redirect_url = api_config.get("redirect_url", "")
+        default_model = config.DEFAULT_GEMINI_MODEL if api_type == "gemini" else config.DEFAULT_OPENAI_MODEL
+        model = api_config.get("model", default_model)
+
+        request_url = _build_api_url(api_type, api_key, redirect_url, model)
+        headers = _build_request_headers(api_type, api_key, redirect_url)
+        request_data = _build_test_request_data(api_type, model, test_content)
+
+        is_official_api = False
+        if api_type == "gemini":
+            is_official_api = not redirect_url or "generativelanguage.googleapis.com" in redirect_url
+        else:
+            is_official_api = not redirect_url or "openai.com" in redirect_url
+
+        connect_timeout = 8
+        read_timeout = 20 if is_official_api else 25
+        display_label = api_config.get("name") or (api_key[:8] + "..." if api_key else "")
+        logger.info(
+            f"API测试使用快速超时策略[{display_label or api_type}]："
+            f"connect={connect_timeout}s, read={read_timeout}s"
+        )
+
+        response_json = _make_api_request(
+            url=request_url,
+            headers=headers,
+            data=request_data,
+            api_type=api_type,
+            max_retries=1,
+            retry_delay=1,
+            timeout=(connect_timeout, read_timeout),
+            display_label=display_label,
+        )
+        if not response_json:
+            return False, "请求超时或无响应"
+
+        result = _parse_llm_response(response_json, api_type)
+        if result and result.strip():
             return True, ""
         return False, "无法获取有效响应"
     except Exception as e:
