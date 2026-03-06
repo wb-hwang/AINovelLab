@@ -1,309 +1,206 @@
-# AI小说工具 API配置详细说明
+# AI小说工具 API 配置说明
 
-本文档详细介绍了AI小说工具支持的所有API服务配置方法。
+本文档说明当前版本 `api_keys.json` 的实际配置结构，以及应用内相关页面的行为。
 
 ![API配置界面](image/1.png)
 
-## 目录
+## 配置文件位置
 
-- [Gemini API配置](#gemini-api配置)
-- [OpenAI API配置](#openai-api配置)
-- [兼容OpenAI格式的其他LLM服务](#兼容openai格式的其他llm服务)
-- [本地模型配置](#本地模型配置)
-- [多API并行和服务切换](#多api并行和服务切换)
+- 默认文件名：`api_keys.json`
+- 应用会优先在项目根目录或程序所在目录查找
+- 如果 `API测试` 页点击 `新增配置` 时目标位置还没有配置文件，程序会自动创建
 
-## Gemini API配置
-
-### 获取API密钥
-
-1. 访问 [Google AI Studio](https://aistudio.google.com/)
-2. 注册/登录账号
-3. 在左侧菜单中找到"API密钥"选项
-4. 创建新的API密钥并复制
-
-![Gemini API密钥获取](image/2.png)
-
-### 基本配置示例
+## 当前配置格式
 
 ```json
 {
   "gemini_api": [
     {
-      "key": "你的API密钥",
-      "model": "gemini-2.0-flash",
-      "redirect_url": "https://generativelanguage.googleapis.com/v1beta/models",
-      "rpm": 5
-    }
-  ],
-  "max_rpm": 20
-}
-```
-
-### 多API密钥配置
-
-为提高处理效率，你可以配置多个API密钥：
-
-```json
-{
-  "gemini_api": [
-    {
-      "key": "你的第一个API密钥",
-      "model": "gemini-2.0-flash",
-      "redirect_url": "https://generativelanguage.googleapis.com/v1beta/models",
-      "rpm": 5
-    },
-    {
-      "key": "你的第二个API密钥",
-      "model": "gemini-1.5-flash",
-      "rpm": 6
-    },
-    {
-      "key": "你的第三个API密钥",
-      "model": "gemini-2.0-pro",
-      "rpm": 3
-    }
-  ],
-  "max_rpm": 20
-}
-```
-
-### 最简配置示例
-
-只提供API密钥，使用默认设置：
-
-```json
-{
-  "gemini_api": [
-    {
-      "key": "你的API密钥"
-    }
-  ],
-  "max_rpm": 20
-}
-```
-
-### 配置项说明
-
-- `key`: 你的Gemini API密钥
-- `model`: 使用的模型名称，推荐选项：
-  - `gemini-2.0-flash` - 速度最快
-  - `gemini-1.5-flash` - 平衡速度和质量
-  - `gemini-2.0-pro` - 质量最好但速度较慢
-- `redirect_url`: API代理地址，可选，默认为：`https://generativelanguage.googleapis.com/v1beta/models`
-- `rpm`: 每分钟请求次数限制（Rate Per Minute）
-- `max_rpm`: 所有API密钥的总体最大RPM限制
-
-## OpenAI API配置
-
-### 获取API密钥
-
-1. 访问 [OpenAI Platform](https://platform.openai.com/)
-2. 注册/登录账号
-3. 在右上角个人头像下拉菜单中选择"View API keys"
-4. 点击"Create new secret key"并复制生成的密钥
-
-![OpenAI API密钥获取](image/3.png)
-
-### 基本配置示例
-
-```json
-{
-  "openai_api": [
-    {
-      "key": "你的OpenAI API密钥",
-      "model": "gpt-3.5-turbo",
-      "redirect_url": "https://api.openai.com/v1/chat/completions",
-      "rpm": 3
-    }
-  ],
-  "max_rpm": 20
-}
-```
-
-### 完整配置示例（同时配置Gemini和OpenAI）
-
-```json
-{
-  "gemini_api": [
-    {
+      "name": "Gemini 主配置",
       "key": "你的Gemini API密钥",
       "model": "gemini-2.0-flash",
       "redirect_url": "https://generativelanguage.googleapis.com/v1beta/models",
-      "rpm": 5
+      "concurrency": 1
     }
   ],
   "openai_api": [
     {
-      "key": "你的OpenAI API密钥",
-      "model": "gpt-3.5-turbo",
-      "redirect_url": "https://api.openai.com/v1/chat/completions",
-      "rpm": 3
-    },
-    {
-      "key": "你的第二个OpenAI API密钥",
-      "model": "gpt-4",
-      "rpm": 2
+      "name": "DeepSeek 主配置",
+      "key": "你的OpenAI或兼容接口密钥",
+      "model": "deepseek-chat",
+      "redirect_url": "https://api.deepseek.com/v1/chat/completions",
+      "concurrency": 2
     }
-  ],
-  "max_rpm": 20,
-  "preferred_api": "gemini"
+  ]
 }
 ```
 
-### 配置项说明
+## 配置项说明
 
-- `key`: 你的OpenAI API密钥
-- `model`: 使用的模型名称，主要选项：
-  - `gpt-3.5-turbo` - 速度快，成本低
-  - `gpt-4` - 质量高，成本高
-- `redirect_url`: API代理地址，可选，默认为：`https://api.openai.com/v1/chat/completions`
-- `rpm`: 每分钟请求次数限制（根据你的账户额度设置）
-- `preferred_api`：首选API服务，可设置为`"gemini"`或`"openai"`
+- `name`
+  - 可选
+  - 用于在界面中区分不同配置
+  - `提示词调整`、`API测试`、`配置状态` 等界面会优先显示这个名字
 
-### 模型选择建议
+- `key`
+  - 必填
+  - API 密钥或兼容接口所需的认证串
 
-- 对于普通文本处理：`gpt-3.5-turbo`速度较快，成本较低
-- 对于质量要求高的处理：`gpt-4`质量更好，但成本较高
-- OpenAI模型对中文处理的能力整体优于Gemini，但价格相对较高
+- `model`
+  - 可选
+  - 模型名称
+  - 留空时会回退到对应服务的默认模型
 
-> **费用提示**：使用OpenAI API会产生费用，请注意控制使用量，避免产生过高账单。
+- `redirect_url`
+  - 可选
+  - 自定义接口地址
+  - 留空时使用官方默认地址
 
-## 兼容OpenAI格式的其他LLM服务
+- `concurrency`
+  - 必填，建议 `1` 起步
+  - 表示这条配置允许同时处理的任务数
+  - 总可用并发数 = 当前所有可用配置的 `concurrency` 之和
 
-本工具支持所有兼容OpenAI API格式的大语言模型服务，包括但不限于：
+## 已废弃字段
 
-- DeepSeek
-- Grok
-- Claude (通过兼容层)
-- Qwen (通义千问)
-- GLM (智谱AI)
-- 百度文心一言
-- 阿里通义千问
+当前版本已经不再使用以下字段：
 
-### 配置示例
+- `rpm`
+- `max_rpm`
+- `preferred_api`
 
-配置其他兼容OpenAI API的服务只需在`openai_api`部分添加相应配置：
+如果旧配置文件中仍包含这些字段，程序在加载/保存时会自动忽略或移除。
 
-```json
-{
-  "openai_api": [
-    {
-      "key": "你的API密钥",
-      "model": "适用的模型名称",
-      "rpm": 3,
-      "redirect_url": "https://api.deepseek.com/v1/chat/completions"
-    },
-    {
-      "key": "你的另一个API密钥",
-      "model": "grok-1",
-      "rpm": 2,
-      "redirect_url": "https://api.grok.ai/v1/chat/completions"
-    }
-  ],
-  "preferred_api": "openai"
-}
-```
-
-### 配置项说明
-
-- `redirect_url`: 服务提供商的API代理地址，必须指向兼容OpenAI API格式的端点
-- `model`: 根据服务提供商支持的模型名称填写
-
-### 常见服务商的模型和端点
-
-| 服务商 | 模型示例 | 基础URL |
-|-------|--------|---------|
-| DeepSeek | deepseek-chat | https://api.deepseek.com/v1/chat/completions |
-| Grok | grok-1 | https://api.grok.ai/v1/chat/completions |
-| 智谱AI | glm-4 | https://api.chatglm.cn/v1/chat/completions |
-| 通义千问 | qwen-turbo, qwen-plus | https://dashscope.aliyuncs.com/api/v1/chat/completions |
-| Claude | claude-3-opus | https://api.anthropic.com/v1/chat/completions |
-
-## 本地模型配置
-
-### 使用LM Studio
-
-```json
-{
-  "openai_api": [
-    {
-      "key": "无需真实密钥",
-      "model": "你部署的模型名称",
-      "rpm": 1,
-      "redirect_url": "http://localhost:1234/v1/chat/completions"
-    }
-  ],
-  "preferred_api": "openai"
-}
-```
-
-### 使用Ollama
-
-```json
-{
-  "openai_api": [
-    {
-      "key": "ollama",
-      "model": "llama3",
-      "rpm": 1,
-      "redirect_url": "http://localhost:11434/v1/chat/completions"
-    }
-  ],
-  "preferred_api": "openai"
-}
-```
-
-## 多API并行和服务切换
-
-程序会根据以下逻辑智能地在不同API服务之间切换：
-
-1. 优先使用`preferred_api`指定的服务
-2. 在同一类API中，按照配置顺序轮流使用不同密钥
-3. 当某个API服务不可用或达到配额限制时，自动切换到另一种服务
-4. 如果你同时配置了Gemini和多种OpenAI兼容服务，程序会优先考虑`preferred_api`的设置
-
-### 高级配置示例
-
-同时使用多种API服务，最大化处理效率：
+## Gemini 配置示例
 
 ```json
 {
   "gemini_api": [
     {
-      "key": "你的Gemini API密钥-1",
+      "name": "Gemini-A",
+      "key": "你的第一个Gemini密钥",
       "model": "gemini-2.0-flash",
       "redirect_url": "https://generativelanguage.googleapis.com/v1beta/models",
-      "rpm": 5
+      "concurrency": 1
     },
     {
-      "key": "你的Gemini API密钥-2",
+      "name": "Gemini-B",
+      "key": "你的第二个Gemini密钥",
       "model": "gemini-2.0-flash",
-      "rpm": 5
+      "concurrency": 2
     }
-  ],
-  "openai_api": [
-    {
-      "key": "你的OpenAI API密钥",
-      "model": "gpt-3.5-turbo",
-      "redirect_url": "https://api.openai.com/v1/chat/completions",
-      "rpm": 3
-    },
-    {
-      "key": "你的DeepSeek API密钥",
-      "model": "deepseek-chat",
-      "rpm": 10,
-      "redirect_url": "https://api.deepseek.com/v1/chat/completions"
-    },
-    {
-      "key": "无需真实密钥",
-      "model": "llama3",
-      "rpm": 2,
-      "redirect_url": "http://localhost:1234/v1/chat/completions"
-    }
-  ],
-  "max_rpm": 30,
-  "preferred_api": "openai"
+  ]
 }
 ```
 
-> **提示**：配置多种API服务可以同时提高处理速度和容错性，当某个服务不可用时，程序会自动切换到其他可用服务。 
+## OpenAI / 兼容接口示例
+
+```json
+{
+  "openai_api": [
+    {
+      "name": "OpenAI 官方",
+      "key": "你的OpenAI密钥",
+      "model": "gpt-4o-mini",
+      "redirect_url": "https://api.openai.com/v1/chat/completions",
+      "concurrency": 1
+    },
+    {
+      "name": "DeepSeek",
+      "key": "你的DeepSeek密钥",
+      "model": "deepseek-chat",
+      "redirect_url": "https://api.deepseek.com/v1/chat/completions",
+      "concurrency": 2
+    }
+  ]
+}
+```
+
+## 本地模型示例
+
+### LM Studio
+
+```json
+{
+  "openai_api": [
+    {
+      "name": "LM Studio",
+      "key": "local",
+      "model": "你部署的模型名称",
+      "redirect_url": "http://localhost:1234/v1/chat/completions",
+      "concurrency": 1
+    }
+  ]
+}
+```
+
+### Ollama 兼容端点
+
+```json
+{
+  "openai_api": [
+    {
+      "name": "Ollama",
+      "key": "ollama",
+      "model": "llama3",
+      "redirect_url": "http://localhost:11434/v1/chat/completions",
+      "concurrency": 1
+    }
+  ]
+}
+```
+
+## 当前调度逻辑
+
+### 1. 混合模式
+
+- 如果同时存在 Gemini 和 OpenAI 配置，脱水任务会在两类服务之间分流
+- 如果只有一类服务可用，则只使用该类服务
+
+### 2. 同类配置内部调度
+
+- 同类配置会由运行时调度器自动分配
+- 调度时会综合考虑：
+  - 当前实际占用并发数
+  - 配置的并发上限
+  - 最近成功率
+  - 轮换顺序
+
+### 3. 失败冷却与废弃
+
+单条配置实例的处理策略如下：
+
+- 连续失败 `3` 次：进入冷却
+- 连续失败 `4` 次：冷却时间继续增长
+- 连续失败 `5` 次及以上：进入 `10` 分钟冷却
+- 累计失败 `20` 次：本轮任务中跳过该配置
+- 所有配置都不可用时：进入全局冷却
+
+## 应用内相关页面
+
+### API测试
+
+- 支持 `新增配置 / 编辑 / 删除 / 测试`
+- 新增或修改配置时会直接写回 `api_keys.json`
+- 测试采用快速超时策略，不再长时间卡住
+
+### 脱水处理
+
+- `配置状态` 按钮可查看当前任务周期内每个配置的：
+  - 本次任务状态
+  - 实际并发数
+  - 配置并发数
+  - 成功请求数
+  - 失败请求数
+  - 成功率
+
+### 提示词调整
+
+- `选择API密钥` 下拉框优先显示配置里的 `name`
+
+## 建议
+
+- 初始建议每条配置从 `concurrency: 1` 开始
+- 如果某个服务稳定、响应快，再逐步提高到 `2` 或 `3`
+- 本地模型和第三方代理通常更容易出现慢响应，建议保守设置并发
+- 配置较多时，优先为每条配置填写 `name`，便于在界面中排查问题

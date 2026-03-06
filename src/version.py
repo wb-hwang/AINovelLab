@@ -5,10 +5,10 @@ AI小说工具 - 版本信息
 """
 
 # 版本号格式：主版本号.次版本号.修订号
-VERSION = "0.0.9"
-VERSION_INFO = (0, 0, 9)  # 用于程序内部比较2
+VERSION = "0.1.0"
+VERSION_INFO = (0, 1, 0)  # 用于程序内部比较2
 # 构建信息
-BUILD_DATE = "2025-09-07"  # 更新构建日期
+BUILD_DATE = "2026-03-06"  # 更新构建日期
 BUILD_TYPE = "release"  # release, beta, alpha, dev
 
 # 版本字符串

@@ -91,11 +91,11 @@ class ApiConfigDialog(QDialog):
         form_layout.addRow("名称", self.name_input)
 
         self.model_input = QLineEdit(self._config_data.get("model", ""))
-        self.model_input.setPlaceholderText("可选，例如 gemini-2.0-flash")
+        self.model_input.setPlaceholderText("例如 gpt-4o-mini")
         form_layout.addRow("模型", self.model_input)
 
         self.redirect_url_input = QLineEdit(self._config_data.get("redirect_url", ""))
-        self.redirect_url_input.setPlaceholderText("可选，留空则使用默认地址")
+        self.redirect_url_input.setPlaceholderText("如：https://api.openai.com/v1/chat/completions")
         form_layout.addRow("请求地址", self.redirect_url_input)
 
         self.key_input = QLineEdit(self._config_data.get("key", ""))
@@ -174,8 +174,10 @@ class ApiTestTab(QWidget):
         main_layout.setSpacing(10)
         
         # 创建说明标签
-        info_label = QLabel("此功能用于测试配置文件中的API密钥是否有效。\n"
-                             "点击'测试全部'按钮可以一次性测试所有API，或者点击各API右侧的'测试'按钮单独测试。")
+        info_label = QLabel(
+            "此功能用于管理并测试配置文件中的 API 配置。\n"
+            "支持新增、编辑、删除配置；每条配置独立设置并发数。测试使用快速超时策略，避免长时间卡住。"
+        )
         info_label.setObjectName("sectionDescription")
         info_label.setWordWrap(True)
         main_layout.addWidget(info_label)
@@ -655,12 +657,12 @@ class ApiTestTab(QWidget):
         # 如果没有API配置，添加提示行
         if api_count == 0:
             self.api_table.insertRow(0)
-            no_api_item = QTableWidgetItem("未找到API配置，请在api_keys.json文件中添加配置")
+            no_api_item = QTableWidgetItem("未找到API配置，可点击“新增配置”自动创建配置文件并添加首条配置")
             no_api_item.setFlags(no_api_item.flags() & ~Qt.ItemIsEditable)
             no_api_item.setTextAlignment(Qt.AlignCenter)
             self.api_table.setItem(0, 0, no_api_item)
             self.api_table.setSpan(0, 0, 1, 4)  # 合并单元格
-            self.progress_label.setText("当前没有可测试的 API 配置，请先补充密钥。")
+            self.progress_label.setText("当前没有可测试的 API 配置，请点击“新增配置”补充。")
             set_label_state(self.progress_label, "warning")
             self.progress_label.show()
         else:

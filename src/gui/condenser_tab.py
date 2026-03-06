@@ -274,7 +274,7 @@ class CondenserTab(QWidget):
         style_button(self.clear_log_button, "ghost")
         self.clear_log_button.clicked.connect(self.clear_log)
 
-        self.key_stats_button = QPushButton("Key状态")
+        self.key_stats_button = QPushButton("配置状态")
         self.key_stats_button.setObjectName("key_stats_button")
         style_button(self.key_stats_button, "ghost")
         self.key_stats_button.clicked.connect(self.show_key_runtime_status)
@@ -348,14 +348,14 @@ class CondenserTab(QWidget):
 
     def _create_key_status_dialog(self, stats):
         dialog = QDialog(self)
-        dialog.setWindowTitle("API Key 运行状态")
+        dialog.setWindowTitle("API 配置运行状态")
         dialog.resize(920, 420)
 
         layout = QVBoxLayout(dialog)
         layout.setContentsMargins(16, 16, 16, 16)
         layout.setSpacing(10)
 
-        description = QLabel("显示当前任务周期内每个配置实例的状态、实际并发、配置并发、成功/失败请求统计。")
+        description = QLabel("显示当前任务周期内每个配置实例的状态、实际并发、配置并发、成功请求数、失败请求数等运行数据。")
         description.setWordWrap(True)
         description.setObjectName("mutedMeta")
         layout.addWidget(description)
@@ -416,7 +416,7 @@ class CondenserTab(QWidget):
     def show_key_runtime_status(self):
         stats = self._collect_key_runtime_stats()
         if not stats:
-            QMessageBox.information(self, "暂无数据", "当前还没有可展示的 Key 运行状态。\n请先开始一次脱水任务。")
+            QMessageBox.information(self, "暂无数据", "当前还没有可展示的配置运行状态。\n请先开始一次脱水任务。")
             return
 
         dialog = self._create_key_status_dialog(stats)
