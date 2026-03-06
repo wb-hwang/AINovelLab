@@ -14,17 +14,13 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union
 
 # 导入配置和工具函数
-try:
-    from . import config
-    from ..utils import setup_logger, ensure_dir, read_text_file, get_safe_filename
-except ImportError:
-    import config
-    from utils import setup_logger, ensure_dir, read_text_file, get_safe_filename
+from . import config
+from ..utils import setup_logger, ensure_dir, read_text_file, get_safe_filename
 
 # 设置日志记录器
 logger = setup_logger(__name__)
 
-# 全局变量
+# 全局变量（兼容层）：优先使用函数参数传入的 output_dir；仅在未传参时才回退到此全局变量。
 OUTPUT_DIR = None  # 脱水小说输出目录
 
 def read_file(file_path: str) -> str:
@@ -97,7 +93,12 @@ def is_directory_file(content):
     
     return False
 
-def save_to_output_dir(file_path: str, content: str, file_type: str = "condensed") -> Optional[str]:
+def save_to_output_dir(
+    file_path: str,
+    content: str,
+    file_type: str = "condensed",
+    output_dir: Optional[str] = None,
+) -> Optional[str]:
     """保存内容到输出目录
 
     Args:
@@ -108,27 +109,22 @@ def save_to_output_dir(file_path: str, content: str, file_type: str = "condensed
     Returns:
         保存后的文件路径，如果保存失败则返回None
     """
-    global OUTPUT_DIR
-    
     file_name = os.path.basename(file_path)
     file_dir = os.path.dirname(file_path)
     
     # 使用自定义输出目录或默认的condensed子目录
-    if OUTPUT_DIR:
-        output_dir = OUTPUT_DIR
-    else:
-        output_dir = os.path.join(file_dir, "condensed")
+    final_output_dir = output_dir or OUTPUT_DIR or os.path.join(file_dir, "condensed")
     
     # 确保输出目录存在
-    if not os.path.exists(output_dir):
+    if not os.path.exists(final_output_dir):
         try:
-            os.makedirs(output_dir)
+            os.makedirs(final_output_dir)
         except Exception as e:
             logger.error(f"创建输出目录失败: {e}")
             return None
     
     # 使用原始文件名保存到输出目录
-    output_path = os.path.join(output_dir, file_name)
+    output_path = os.path.join(final_output_dir, file_name)
     
     try:
         with open(output_path, 'w', encoding='utf-8') as f:
@@ -139,7 +135,11 @@ def save_to_output_dir(file_path: str, content: str, file_type: str = "condensed
         logger.error(f"保存文件时出错: {e}")
         return None
 
-def save_condensed_novel(original_path: str, condensed_content: str) -> Optional[str]:
+def save_condensed_novel(
+    original_path: str,
+    condensed_content: str,
+    output_dir: Optional[str] = None,
+) -> Optional[str]:
     """保存脱水后的小说内容
 
     Args:
@@ -149,9 +149,9 @@ def save_condensed_novel(original_path: str, condensed_content: str) -> Optional
     Returns:
         保存后的文件路径，如果保存失败则返回None
     """
-    return save_to_output_dir(original_path, condensed_content, "脱水后的小说")
+    return save_to_output_dir(original_path, condensed_content, "脱水后的小说", output_dir=output_dir)
 
-def get_output_file_path(file_path):
+def get_output_file_path(file_path: str, output_dir: Optional[str] = None) -> Optional[str]:
     """获取文件的输出路径
     
     Args:
@@ -160,32 +160,32 @@ def get_output_file_path(file_path):
     Returns:
         str: 输出文件路径
     """
-    global OUTPUT_DIR
-    
     # 获取文件名
     file_name = os.path.basename(file_path)
     
     # 如果未指定输出目录，使用默认值
-    if OUTPUT_DIR is None:
+    if output_dir is not None:
+        final_output_dir = output_dir
+    elif OUTPUT_DIR is None:
         # 获取输入文件所在目录
         input_dir = os.path.dirname(file_path)
         # 在输入目录下创建condensed子目录
-        output_dir = os.path.join(input_dir, "condensed")
+        final_output_dir = os.path.join(input_dir, "condensed")
     else:
-        output_dir = OUTPUT_DIR
+        final_output_dir = OUTPUT_DIR
     
     # 确保输出目录存在
-    if not os.path.exists(output_dir):
+    if not os.path.exists(final_output_dir):
         try:
-            os.makedirs(output_dir)
+            os.makedirs(final_output_dir)
         except Exception as e:
             logger.error(f"创建输出目录失败: {e}")
             return None
     
     # 返回完整的输出文件路径
-    return os.path.join(output_dir, file_name)
+    return os.path.join(final_output_dir, file_name)
 
-def save_directory_file(file_path: str) -> Optional[str]:
+def save_directory_file(file_path: str, output_dir: Optional[str] = None) -> Optional[str]:
     """直接保存目录文件（不进行脱水）
 
     Args:
@@ -197,7 +197,7 @@ def save_directory_file(file_path: str) -> Optional[str]:
     try:
         with open(file_path, 'r', encoding='utf-8') as src_file:
             content = src_file.read()
-        return save_to_output_dir(file_path, content, "目录文件")
+        return save_to_output_dir(file_path, content, "目录文件", output_dir=output_dir)
     except Exception as e:
         logger.error(f"复制目录文件时出错: {e}")
         return None
@@ -336,7 +336,12 @@ def _find_files_by_wider_search(file_pattern: str, num_range: Tuple[int, int],
     
     return sorted(list(set(file_paths)))
 
-def create_cache_for_file(content: str, condensed_content: str, file_path: str) -> bool:
+def create_cache_for_file(
+    content: str,
+    condensed_content: str,
+    file_path: str,
+    output_dir: Optional[str] = None,
+) -> bool:
     """为文件创建缓存，用于避免重复处理
     
     Args:
@@ -352,12 +357,12 @@ def create_cache_for_file(content: str, condensed_content: str, file_path: str) 
         content_hash = hashlib.md5(content.encode('utf-8')).hexdigest()
         
         # 获取文件所在目录
-        output_dir = get_output_file_path(file_path)
-        if not output_dir:
+        output_path = get_output_file_path(file_path, output_dir=output_dir)
+        if not output_path:
             return False
             
         # 创建缓存目录
-        cache_dir = os.path.join(os.path.dirname(output_dir), ".cache")
+        cache_dir = os.path.join(os.path.dirname(output_path), ".cache")
         os.makedirs(cache_dir, exist_ok=True)
         
         # 创建缓存文件路径
@@ -382,7 +387,7 @@ def create_cache_for_file(content: str, condensed_content: str, file_path: str) 
         logger.warning(f"保存缓存失败: {e}")
         return False
 
-def get_cached_content(file_path: str) -> Optional[str]:
+def get_cached_content(file_path: str, output_dir: Optional[str] = None) -> Optional[str]:
     """获取文件的缓存内容
     
     Args:
@@ -400,11 +405,11 @@ def get_cached_content(file_path: str) -> Optional[str]:
         content_hash = hashlib.md5(content.encode('utf-8')).hexdigest()
         
         # 尝试获取缓存文件
-        output_dir = get_output_file_path(file_path)
-        if not output_dir:
+        output_path = get_output_file_path(file_path, output_dir=output_dir)
+        if not output_path:
             return None
             
-        cache_dir = os.path.join(os.path.dirname(output_dir), ".cache")
+        cache_dir = os.path.join(os.path.dirname(output_path), ".cache")
         file_name = os.path.basename(file_path)
         cache_file = os.path.join(cache_dir, file_name + ".json")
         

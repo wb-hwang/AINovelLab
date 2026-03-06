@@ -10,12 +10,8 @@ from collections import deque
 from typing import Dict, List, Optional
 
 # 导入配置
-try:
-    from . import config
-    from ..utils import setup_logger
-except ImportError:
-    import config
-    from utils import setup_logger
+from . import config
+from ..utils import setup_logger
 
 # 设置日志记录器
 logger = setup_logger(__name__)

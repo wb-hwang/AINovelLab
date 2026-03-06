@@ -174,11 +174,57 @@ def escape_html(text):
 
 
 def write_epub(book, output_path):
-    """将EPUB书籍写入文件"""
+    """将EPUB书籍写入文件（优先使用 ebooklib 原生写出）
+
+    说明：历史实现使用系统临时目录手写 OPF/NCX/container.xml 并 zip 打包。
+    在部分运行环境中系统临时目录不可写，会导致必然失败；同时手写 XML 风险更高。
+    """
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # 先走 ebooklib 标准写出路径
     try:
-        output_path = Path(output_path)
-        temp_dir = Path(tempfile.mkdtemp())
-        logger.info(f"创建临时目录: {temp_dir}")
+        try:
+            import ebooklib
+            empty_docs = []
+            for item in book.get_items_of_type(ebooklib.ITEM_DOCUMENT):
+                body = item.get_body_content()
+                if isinstance(body, (bytes, bytearray)):
+                    body_text = body.decode("utf-8", errors="ignore")
+                else:
+                    body_text = str(body) if body is not None else ""
+                if not body_text.strip():
+                    empty_docs.append(f"{getattr(item, 'file_name', '?')} ({type(item).__name__})")
+            if empty_docs:
+                logger.error(f"EPUB文档存在空body（ebooklib可能会失败）: {', '.join(empty_docs)}")
+        except Exception:
+            pass
+
+        epub.write_epub(str(output_path), book, {})
+        if output_path.exists() and output_path.stat().st_size > 1000:
+            logger.info(f"EPUB文件已生成: {output_path}, 大小: {output_path.stat().st_size/1024:.2f} KB")
+            return True
+        logger.error(f"生成的EPUB文件失败或文件过小: {output_path}")
+        return False
+    except Exception as e:
+        import traceback
+        logger.error(f"ebooklib 写出EPUB失败，将尝试 legacy 路径: {e}")
+        logger.error(f"详细错误: {traceback.format_exc()}")
+
+    return _write_epub_legacy(book, output_path)
+
+
+def _write_epub_legacy(book, output_path: Path):
+    """legacy 写出路径：保留旧逻辑以便回滚（临时目录改到项目 tmp/ 下避免权限问题）"""
+    try:
+        project_root = Path(__file__).resolve().parents[2]
+        tmp_root = project_root / "tmp"
+        tmp_root.mkdir(parents=True, exist_ok=True)
+
+        # 注意：本运行环境下 tempfile.mkdtemp() 创建的目录不可写；改用显式 mkdir
+        temp_dir = tmp_root / f"epub-legacy-{uuid.uuid4().hex}"
+        temp_dir.mkdir(parents=True, exist_ok=False)
+        logger.info(f"创建临时目录(legacy): {temp_dir}")
         
         # 创建mimetype文件（必须是第一个文件，且不压缩）
         mimetype_path = temp_dir / "mimetype"
@@ -207,14 +253,17 @@ def write_epub(book, output_path):
         for item in book.items:
             if isinstance(item, epub.EpubItem) and item.file_name.endswith('.css'):
                 css_path = oebps_dir / item.file_name
-                with open(css_path, "w", encoding="utf-8") as f:
-                    f.write(item.content)
+                data = item.content
+                if isinstance(data, str):
+                    data = data.encode("utf-8")
+                with open(css_path, "wb") as f:
+                    f.write(data)
         
         # 写入所有HTML文件
         for item in book.items:
             if isinstance(item, epub.EpubHtml):
                 html_path = oebps_dir / item.file_name
-                with open(html_path, "w", encoding="utf-8") as f:
+                with open(html_path, "wb") as f:
                     # 验证内容是否为空
                     if not item.content or len(item.content) < 10:
                         safe_title = escape_html(item.title)
@@ -231,14 +280,20 @@ def write_epub(book, output_path):
     <p>（本章内容已丢失，请检查原始文件）</p>
 </body>
 </html>'''
-                    f.write(item.content)
+                    data = item.content
+                    if isinstance(data, str):
+                        data = data.encode("utf-8")
+                    f.write(data)
         
         # 写入导航文件
         for item in book.items:
             if isinstance(item, epub.EpubNav):
                 nav_path = oebps_dir / item.file_name
-                with open(nav_path, "w", encoding="utf-8") as f:
-                    f.write(item.content)
+                data = item.content
+                if isinstance(data, str):
+                    data = data.encode("utf-8")
+                with open(nav_path, "wb") as f:
+                    f.write(data)
         
         # 写入NCX文件
         ncx_path = oebps_dir / "toc.ncx"
@@ -373,23 +428,20 @@ def write_epub(book, output_path):
         
         logger.info(f"创建EPUB文件: {output_path}")
         
-        epub_file = zipfile.ZipFile(output_path, 'w')
-        
-        # 首先添加mimetype文件，不压缩
-        epub_file.write(mimetype_path, "mimetype", compress_type=zipfile.ZIP_STORED)
-        
-        # 添加其他所有文件，使用压缩
-        for root, dirs, files in os.walk(temp_dir):
-            for file in files:
-                if file != "mimetype":
-                    file_path = Path(root) / file
-                    arcname = str(file_path.relative_to(temp_dir))
-                    epub_file.write(file_path, arcname, compress_type=zipfile.ZIP_DEFLATED)
-        
-        epub_file.close()
-        
+        with zipfile.ZipFile(output_path, 'w') as epub_file:
+            # 首先添加mimetype文件，不压缩
+            epub_file.write(mimetype_path, "mimetype", compress_type=zipfile.ZIP_STORED)
+
+            # 添加其他所有文件，使用压缩
+            for root, dirs, files in os.walk(temp_dir):
+                for file in files:
+                    if file != "mimetype":
+                        file_path = Path(root) / file
+                        arcname = str(file_path.relative_to(temp_dir))
+                        epub_file.write(file_path, arcname, compress_type=zipfile.ZIP_DEFLATED)
+
         # 清理临时目录
-        shutil.rmtree(temp_dir)
+        shutil.rmtree(temp_dir, ignore_errors=True)
         
         # 验证生成的文件
         if output_path.exists() and output_path.stat().st_size > 1000:
@@ -402,6 +454,11 @@ def write_epub(book, output_path):
         logger.error(f"创建EPUB文件时出错: {e}")
         import traceback
         logger.error(f"详细错误: {traceback.format_exc()}")
+        try:
+            if 'temp_dir' in locals() and isinstance(temp_dir, Path) and temp_dir.exists():
+                shutil.rmtree(temp_dir, ignore_errors=True)
+        except Exception:
+            pass
         return False
 
 
@@ -497,7 +554,7 @@ def merge_txt_to_epub(folder_path, output_path=None, author=None, novel_name=Non
         <p class="author">作者：{author if author else "佚名"}</p>
     </div>
 </body>
-</html>'''
+</html>'''.encode("utf-8")
         book.add_item(cover)
         cover.add_link(href="style.css", rel="stylesheet", type="text/css")
         
@@ -521,7 +578,7 @@ def merge_txt_to_epub(folder_path, output_path=None, author=None, novel_name=Non
 <body>
     {toc_content}
 </body>
-</html>'''
+</html>'''.encode("utf-8")
         book.add_item(toc_page)
         toc_page.add_link(href="style.css", rel="stylesheet", type="text/css")
         
@@ -561,7 +618,7 @@ def merge_txt_to_epub(folder_path, output_path=None, author=None, novel_name=Non
     <h1>{safe_title}</h1>
     {paragraphs_html}
 </body>
-</html>'''
+</html>'''.encode("utf-8")
                 
                 c.add_link(href="style.css", rel="stylesheet", type="text/css")
                 book.add_item(c)
@@ -578,6 +635,21 @@ def merge_txt_to_epub(folder_path, output_path=None, author=None, novel_name=Non
         # 添加导航
         book.add_item(epub.EpubNcx())
         nav = epub.EpubNav()
+        # ebooklib 0.17.1: 若 nav 文档 body 为空，write_epub 在生成导航页时会触发 lxml "Document is empty"
+        # 提供最小 XHTML skeleton，后续由 writer 注入真正的 toc 内容。
+        nav.content = f'''<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops">
+<head>
+    <title>Navigation</title>
+    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
+</head>
+<body>
+    <nav epub:type="toc" id="toc">
+        <ol></ol>
+    </nav>
+</body>
+</html>'''.encode("utf-8")
         nav.add_link(href="style.css", rel="stylesheet", type="text/css")
         book.add_item(nav)
         
@@ -606,7 +678,7 @@ def merge_txt_to_epub(folder_path, output_path=None, author=None, novel_name=Non
         
         # 创建EPUB文件
         if write_epub(book, output_path):
-            print(f"EPUB文件已成功生成: {output_path}")
+            logger.info(f"EPUB文件已成功生成: {output_path}")
             return str(output_path)
         else:
             logger.error("创建EPUB文件失败")

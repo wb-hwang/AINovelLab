@@ -5,27 +5,15 @@
 """
 
 import os
-import sys
-from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, 
-                           QFileDialog, QMessageBox, QProgressBar, QTextEdit, 
+from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
+                           QFileDialog, QMessageBox, QProgressBar, QTextEdit,
                            QSpinBox, QGroupBox, QLineEdit, QCheckBox, QComboBox, QFrame,
                            QDialog, QDialogButtonBox, QSplitter, QTabWidget)
 from PyQt5.QtCore import pyqtSignal, Qt
 from PyQt5.QtGui import QFont, QTextCursor
 
-# 添加项目根目录到系统路径
-current_dir = os.path.dirname(os.path.abspath(__file__))
-project_root = os.path.dirname(os.path.dirname(current_dir))
-if project_root not in sys.path:
-    sys.path.insert(0, project_root)
-
-# 从核心模块导入处理脚本
-try:
-    from core.novel_condenser import config, key_manager
-    import core.novel_condenser.main as main_module  # 直接导入整个main模块
-except ImportError:
-    from src.core.novel_condenser import config, key_manager
-    import src.core.novel_condenser.main as main_module  # 直接导入整个main模块
+from src.core.novel_condenser import config, key_manager
+import src.core.novel_condenser.main as main_module
 
 from .worker import WorkerThread
 from .prompt_edit_dialog import PromptEditDialog
@@ -311,20 +299,20 @@ class CondenserTab(QWidget):
         self.load_txt_files(split_dir)
         
         # 设置脱水输出目录为"书名目录/condensed"
-        self.output_dir = os.path.join(self.book_base_dir, "condensed")
-        
-        # 如果目录不存在，创建目录
-        if not os.path.exists(self.output_dir):
+        self._set_output_dir(os.path.join(self.book_base_dir, "condensed"), split_dir)
+    
+    def _set_output_dir(self, target_dir, fallback_dir):
+        """设置脱水输出目录，如果目标目录不存在则创建"""
+        if not os.path.exists(target_dir):
             try:
-                os.makedirs(self.output_dir)
+                os.makedirs(target_dir)
             except Exception as e:
                 QMessageBox.warning(self, "警告", f"无法创建脱水输出目录: {str(e)}")
-                # 如果创建失败，使用分割结果目录作为默认输出目录
-                self.output_dir = split_dir
-        
+                target_dir = fallback_dir
+        self.output_dir = target_dir
         self.output_dir_edit.setText(self.output_dir)
         self.add_log(f"设置脱水输出目录: {self.output_dir}")
-    
+
     def browse_folder(self):
         """浏览并选择TXT文件所在文件夹"""
         dir_path = QFileDialog.getExistingDirectory(
@@ -341,36 +329,11 @@ class CondenserTab(QWidget):
             if folder_name.lower() == "splitted":
                 # 如果选择的是splitted目录，则其父目录可能是书名目录
                 self.book_base_dir = parent_dir
-                # 设置脱水输出目录为兄弟目录"condensed"
-                self.output_dir = os.path.join(self.book_base_dir, "condensed")
-                
-                # 如果目录不存在，创建目录
-                if not os.path.exists(self.output_dir):
-                    try:
-                        os.makedirs(self.output_dir)
-                    except Exception as e:
-                        QMessageBox.warning(self, "警告", f"无法创建脱水输出目录: {str(e)}")
-                        # 如果创建失败，使用选择的目录作为输出目录
-                        self.output_dir = dir_path
-                
-                self.output_dir_edit.setText(self.output_dir)
-                self.add_log(f"设置脱水输出目录: {self.output_dir}")
+                self._set_output_dir(os.path.join(parent_dir, "condensed"), dir_path)
             else:
                 # 否则，使用选择的目录的同级目录"condensed"作为输出目录
                 self.book_base_dir = parent_dir
-                self.output_dir = os.path.join(parent_dir, "condensed")
-                
-                # 如果目录不存在，创建目录
-                if not os.path.exists(self.output_dir):
-                    try:
-                        os.makedirs(self.output_dir)
-                    except Exception as e:
-                        QMessageBox.warning(self, "警告", f"无法创建脱水输出目录: {str(e)}")
-                        # 如果创建失败，使用选择的目录作为输出目录
-                        self.output_dir = dir_path
-                
-                self.output_dir_edit.setText(self.output_dir)
-                self.add_log(f"设置脱水输出目录: {self.output_dir}")
+                self._set_output_dir(os.path.join(parent_dir, "condensed"), dir_path)
     
     def browse_output_dir(self):
         """浏览并选择脱水输出目录"""

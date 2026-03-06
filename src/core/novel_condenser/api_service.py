@@ -12,14 +12,9 @@ import re
 from typing import Dict, Optional, List, Any, Union, Tuple, Callable
 
 # 导入配置和工具
-try:
-    from . import config
-    from .key_manager import APIKeyManager
-    from ..utils import setup_logger
-except ImportError:
-    import config
-    from key_manager import APIKeyManager
-    from utils import setup_logger
+from . import config
+from .key_manager import APIKeyManager
+from ..utils import setup_logger
 
 # 设置日志记录器
 logger = setup_logger(__name__)
@@ -1000,10 +995,38 @@ def print_processing_stats(original_content: str, condensed_content: str) -> Non
     condensed_length = len(condensed_content)
     ratio = (condensed_length / original_length) * 100
     
-    print(f"原文长度: {original_length} 字符")
-    print(f"脱水后长度: {condensed_length} 字符")
-    print(f"压缩比例: {ratio:.2f}%")
+    logger.info(f"原文长度: {original_length} 字符")
+    logger.info(f"脱水后长度: {condensed_length} 字符")
+    logger.info(f"压缩比例: {ratio:.2f}%")
     
     # 检查压缩比例是否符合要求
     if ratio < config.MIN_CONDENSATION_RATIO - 5 or ratio > config.MAX_CONDENSATION_RATIO + 5:
-        print(f"警告: 压缩比例 ({ratio:.2f}%) 不在预期范围内 ({config.MIN_CONDENSATION_RATIO}%-{config.MAX_CONDENSATION_RATIO}%)") 
+        logger.info(f"警告: 压缩比例 ({ratio:.2f}%) 不在预期范围内 ({config.MIN_CONDENSATION_RATIO}%-{config.MAX_CONDENSATION_RATIO}%)") 
+
+
+def test_api_key(api_type: str, api_config: Dict[str, Any]) -> Tuple[bool, str]:
+    """测试单个 API 配置是否可用（复用本模块请求/解析逻辑）。
+
+    Args:
+        api_type: "gemini" 或 "openai"
+        api_config: 单条 API 配置（key/redirect_url/model/rpm...）
+
+    Returns:
+        (ok, error_message)
+    """
+    api_type = (api_type or "").lower()
+    if api_type not in ("gemini", "openai"):
+        return False, f"不支持的API类型: {api_type}"
+
+    test_content = "你好，这是API测试消息。请用一句话回复。"
+
+    try:
+        # 用单条配置创建临时 key_manager，复用限流/跳过逻辑（不污染全局 manager）。
+        km = APIKeyManager([api_config], config.DEFAULT_MAX_RPM)
+        func = condense_novel_gemini if api_type == "gemini" else condense_novel_openai
+        result = func(test_content, api_config, km)
+        if result:
+            return True, ""
+        return False, "无法获取有效响应"
+    except Exception as e:
+        return False, str(e)

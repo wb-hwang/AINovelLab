@@ -2,30 +2,18 @@
 """小说处理工具的提示词编辑对话框"""
 
 import os
-import sys
-from PyQt5.QtWidgets import (QVBoxLayout, QHBoxLayout, QLabel, QPushButton, 
-                           QMessageBox, QTextEdit, QSpinBox, QGroupBox, 
+import logging
+from PyQt5.QtWidgets import (QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
+                           QMessageBox, QTextEdit, QSpinBox, QGroupBox,
                            QComboBox, QDialog, QDialogButtonBox, QSplitter)
 from PyQt5.QtCore import pyqtSignal, Qt
 
-# 添加项目根目录到系统路径
-current_dir = os.path.dirname(os.path.abspath(__file__))
-project_root = os.path.dirname(os.path.dirname(current_dir))
-if project_root not in sys.path:
-    sys.path.insert(0, project_root)
-
-# 导入配置模块
-try:
-    from core.novel_condenser import config
-    from core.novel_condenser.config import save_config_to_file
-except ImportError:
-    from src.core.novel_condenser import config
-    try:
-        from src.core.novel_condenser.config import save_config_to_file
-    except ImportError:
-        save_config_to_file = None
+from src.core.novel_condenser import config
+from src.core.novel_condenser.config import save_config_to_file
 
 from .worker import WorkerThread
+
+logger = logging.getLogger(__name__)
 
 class PromptEditDialog(QDialog):
     """提示词编辑和测试对话框"""
@@ -351,11 +339,11 @@ class PromptEditDialog(QDialog):
                 f"目标范围: {target_min}-{target_max}字"
             )
             
-            print("[调试] 当前使用的提示词模板:")
-            print(self.prompt_edit.toPlainText())
+            logger.debug("[调试] 当前使用的提示词模板:")
+            logger.debug(self.prompt_edit.toPlainText())
             
             if "error" in debug_info:
-                print(f"[调试] 发生错误: {debug_info['error']}")
+                logger.debug(f"[调试] 发生错误: {debug_info['error']}")
         
         # 恢复UI状态
         self.set_ui_enabled(True)
@@ -481,8 +469,8 @@ class CondensingTestThread(WorkerThread):
         custom_prompt = self.args.get("custom_prompt", "")
         
         # 打印调试信息
-        print(f"[调试] 准备调用API，内容长度：{len(content)}字")
-        print(f"[调试] 目标压缩比例：{config.MIN_CONDENSATION_RATIO}%-{config.MAX_CONDENSATION_RATIO}%")
+        logger.debug(f"[调试] 准备调用API，内容长度：{len(content)}字")
+        logger.debug(f"[调试] 目标压缩比例：{config.MIN_CONDENSATION_RATIO}%-{config.MAX_CONDENSATION_RATIO}%")
         
         # 初始化结果数据
         result_data = {
@@ -503,14 +491,9 @@ class CondensingTestThread(WorkerThread):
             from src.core.novel_condenser.api_service import (
                 condense_novel_gemini, condense_novel_openai, generate_novel_condenser_prompt
             )
-        except ImportError:
-            try:
-                from core.novel_condenser.api_service import (
-                    condense_novel_gemini, condense_novel_openai, generate_novel_condenser_prompt
-                )
-            except ImportError as e:
-                print(f"[调试] 导入API服务模块失败: {e}")
-                return result_data
+        except ImportError as e:
+            logger.exception(f"[调试] 导入API服务模块失败: {e}")
+            return result_data
         
         # 调用相应API
         api_caller = None
@@ -535,22 +518,22 @@ class CondensingTestThread(WorkerThread):
                     content_length=len(content),
                     custom_prompt_template=custom_prompt
                 )
-                print(f"[调试] 计算的提示词: {calc_prompt}")
+                logger.debug(f"[调试] 计算的提示词: {calc_prompt}")
                 
                 # 调用API
                 condensed = api_caller()
                 if condensed:
                     result_data["content"] = condensed
                     result_data["key_info"] = {"type": key_type, "index": key_index}
-                    print(f"[调试] API调用成功，返回内容长度：{len(condensed)}字")
+                    logger.debug(f"[调试] API调用成功，返回内容长度：{len(condensed)}字")
                 else:
-                    print(f"[调试] API调用返回空内容")
+                    logger.debug("[调试] API调用返回空内容")
             except Exception as e:
                 import traceback
                 error_stack = traceback.format_exc()
-                print(f"[调试] API调用异常：{str(e)}\n{error_stack}")
+                logger.exception(f"[调试] API调用异常：{str(e)}\n{error_stack}")
                 result_data["debug_info"]["error"] = f"{str(e)}\n{error_stack}"
         else:
-            print(f"[调试] 无法获取API处理函数或密钥索引无效: type={key_type}, index={key_index}")
+            logger.debug(f"[调试] 无法获取API处理函数或密钥索引无效: type={key_type}, index={key_index}")
         
         return result_data 

@@ -4,29 +4,14 @@
 小说处理工具的主窗口类
 """
 
-import os
 import sys
-from PyQt5.QtWidgets import (QMainWindow, QTabWidget, QStatusBar, 
+import logging
+from PyQt5.QtWidgets import (QMainWindow, QTabWidget, QStatusBar,
                             QVBoxLayout, QWidget, QLabel, QHBoxLayout, QFrame)
 from PyQt5.QtCore import QSize, pyqtSignal, Qt
 from PyQt5.QtGui import QFont, QIcon, QColor, QPalette
-from ctypes import windll, c_int, byref, sizeof
 
-# 导入版本信息（添加更健壮的错误处理）
-VERSION_STRING = "AI小说工具"  # 默认版本字符串，如果无法导入版本模块则使用此值
-try:
-    from ..version import get_version_string
-    VERSION_STRING = get_version_string()
-except ImportError:
-    try:
-        # 尝试其他导入路径
-        sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-        from version import get_version_string
-        VERSION_STRING = get_version_string()
-    except ImportError:
-        print("警告: 无法导入版本信息模块，将使用默认版本信息")
-    except Exception as e:
-        print(f"警告: 导入版本信息时发生错误: {e}")
+from src.version import get_version_string
 
 from .home_tab import HomeTab
 from .epub_splitter_tab import EpubSplitterTab
@@ -34,7 +19,11 @@ from .condenser_tab import CondenserTab
 from .txt_to_epub_tab import TxtToEpubTab
 from .api_test_tab import ApiTestTab
 from .resources import get_icon
-from .style import get_material_style  # 导入样式表函数
+from .style import get_material_style
+
+VERSION_STRING = get_version_string()
+logger = logging.getLogger(__name__)
+
 
 class MainWindow(QMainWindow):
     """主窗口类"""
@@ -52,15 +41,18 @@ class MainWindow(QMainWindow):
         self.setup_connections()
         
         # 在Windows上启用暗色标题栏
-        if hasattr(windll, 'dwmapi'):
-            # Windows 10 1809或更高版本
-            DWMWA_USE_IMMERSIVE_DARK_MODE = 20
-            windll.dwmapi.DwmSetWindowAttribute(
-                int(self.winId()),
-                DWMWA_USE_IMMERSIVE_DARK_MODE,
-                byref(c_int(2)),
-                sizeof(c_int)
-            )
+        try:
+            from ctypes import windll, c_int, byref, sizeof
+            if hasattr(windll, 'dwmapi'):
+                DWMWA_USE_IMMERSIVE_DARK_MODE = 20
+                windll.dwmapi.DwmSetWindowAttribute(
+                    int(self.winId()),
+                    DWMWA_USE_IMMERSIVE_DARK_MODE,
+                    byref(c_int(2)),
+                    sizeof(c_int)
+                )
+        except (ImportError, OSError):
+            pass
         
         # 如果运行在打包环境中，确保正确应用样式
         if getattr(sys, 'frozen', False):
@@ -69,7 +61,7 @@ class MainWindow(QMainWindow):
     def ensure_style_applied(self):
         """确保在打包环境中正确应用样式表"""
         try:
-            print("在打包环境中重新应用样式...")
+            logger.info("在打包环境中重新应用样式...")
             # 重新应用主样式表
             self.setStyleSheet(get_material_style())
             
@@ -95,9 +87,9 @@ class MainWindow(QMainWindow):
                     for label in card.findChildren(QLabel):
                         label.setStyleSheet("color: #FFFFFF; background-color: transparent;")
                 
-            print("样式重新应用完成")
+            logger.info("样式重新应用完成")
         except Exception as e:
-            print(f"应用样式时出错: {e}")
+            logger.exception(f"应用样式时出错: {e}")
     
     def init_ui(self):
         """初始化用户界面"""
@@ -204,22 +196,9 @@ class MainWindow(QMainWindow):
     
     def closeEvent(self, event):
         """关闭窗口事件处理函数，确保所有后台线程都被停止"""
-        # 停止所有可能存在的工作线程
-        if hasattr(self.epub_splitter_tab, 'worker_thread') and self.epub_splitter_tab.worker_thread:
-            self.epub_splitter_tab.worker_thread.stop()
-            self.epub_splitter_tab.worker_thread.wait(1000)  # 等待最多1秒让线程结束
-            
-        if hasattr(self.condenser_tab, 'worker_thread') and self.condenser_tab.worker_thread:
-            self.condenser_tab.worker_thread.stop()
-            self.condenser_tab.worker_thread.wait(1000)  # 等待最多1秒让线程结束
-            
-        if hasattr(self.txt_to_epub_tab, 'worker_thread') and self.txt_to_epub_tab.worker_thread:
-            self.txt_to_epub_tab.worker_thread.stop()
-            self.txt_to_epub_tab.worker_thread.wait(1000)  # 等待最多1秒让线程结束
-            
-        # 处理可能没有正常退出的线程
-        # 注意：Python的线程无法直接强制终止，所以我们只能设置标志位并等待它们自己结束
-        print("正在关闭所有工作线程...")
-        
-        # 接受关闭事件
+        for tab in (self.epub_splitter_tab, self.condenser_tab, self.txt_to_epub_tab):
+            thread = getattr(tab, 'worker_thread', None)
+            if thread:
+                thread.stop()
+                thread.wait(1000)
         event.accept() 

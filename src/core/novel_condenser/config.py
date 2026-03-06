@@ -11,13 +11,8 @@ import logging
 from typing import Dict, List, Optional, Any
 
 # 导入项目配置
-try:
-    import config as project_config
-    from utils import setup_logger
-except ImportError:
-    # 如果无法导入项目配置，使用相对导入
-    from ..utils import setup_logger
-    project_config = None
+import config.config as project_config
+from ..utils import setup_logger
 
 # 设置日志记录器
 logger = setup_logger(__name__)
@@ -151,7 +146,7 @@ def load_api_config(config_path: Optional[str] = None) -> bool:
     Returns:
         bool: 配置加载是否成功
     """
-    global GEMINI_API_CONFIG, OPENAI_API_CONFIG, DEFAULT_MAX_RPM
+    global DEFAULT_MAX_RPM
     global MIN_CONDENSATION_RATIO, MAX_CONDENSATION_RATIO, TARGET_CONDENSATION_RATIO
     global LLM_GENERATION_PARAMS, PROMPT_TEMPLATES
     
@@ -159,11 +154,17 @@ def load_api_config(config_path: Optional[str] = None) -> bool:
     if project_config:
         # 加载Gemini API配置
         if hasattr(project_config, 'GEMINI_API_CONFIG'):
-            GEMINI_API_CONFIG = project_config.GEMINI_API_CONFIG
+            try:
+                GEMINI_API_CONFIG[:] = list(project_config.GEMINI_API_CONFIG)
+            except Exception:
+                GEMINI_API_CONFIG[:] = []
         
         # 加载OpenAI API配置
         if hasattr(project_config, 'OPENAI_API_CONFIG'):
-            OPENAI_API_CONFIG = project_config.OPENAI_API_CONFIG
+            try:
+                OPENAI_API_CONFIG[:] = list(project_config.OPENAI_API_CONFIG)
+            except Exception:
+                OPENAI_API_CONFIG[:] = []
             
         # 加载RPM配置
         if hasattr(project_config, 'DEFAULT_MAX_RPM'):
@@ -212,7 +213,7 @@ def _load_from_file(file_path: str) -> bool:
     Returns:
         bool: 加载是否成功
     """
-    global GEMINI_API_CONFIG, OPENAI_API_CONFIG, DEFAULT_MAX_RPM
+    global DEFAULT_MAX_RPM
     global MIN_CONDENSATION_RATIO, MAX_CONDENSATION_RATIO, TARGET_CONDENSATION_RATIO
     global LLM_GENERATION_PARAMS, PROMPT_TEMPLATES
     
@@ -226,7 +227,7 @@ def _load_from_file(file_path: str) -> bool:
         
         # 加载Gemini API配置    
         if 'gemini_api' in config_data and isinstance(config_data['gemini_api'], list):
-            GEMINI_API_CONFIG = config_data['gemini_api']
+            GEMINI_API_CONFIG[:] = config_data['gemini_api']
             # 确保每项存在 name 字段
             for item in GEMINI_API_CONFIG:
                 if 'name' not in item:
@@ -235,7 +236,7 @@ def _load_from_file(file_path: str) -> bool:
         
         # 加载OpenAI API配置
         if 'openai_api' in config_data and isinstance(config_data['openai_api'], list):
-            OPENAI_API_CONFIG = config_data['openai_api']
+            OPENAI_API_CONFIG[:] = config_data['openai_api']
             # 确保每项存在 name 字段
             for item in OPENAI_API_CONFIG:
                 if 'name' not in item:
@@ -363,11 +364,9 @@ def create_config_template(config_path: Optional[str] = None) -> None:
             json.dump(template, f, ensure_ascii=False, indent=4)
             
         logger.info(f"已创建配置文件模板: {config_path}")
-        print(f"已创建配置文件模板: {config_path}")
-        print("请编辑此文件并填入您的API密钥")
+        logger.info("请编辑此文件并填入您的API密钥")
     except Exception as e:
         logger.error(f"创建配置文件模板出错: {e}")
-        print(f"创建配置文件模板出错: {e}")
 
 def save_config_to_file(custom_prompt: str) -> bool:
     """将自定义提示词保存到配置文件

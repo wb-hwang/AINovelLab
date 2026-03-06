@@ -14,45 +14,51 @@ import logging
 from typing import Dict, List, Optional, Tuple
 
 # 导入模块
-try:
-    from . import config
-    from .key_manager import APIKeyManager
-    from .file_utils import (
-        read_file, is_directory_file, save_condensed_novel, 
-        save_directory_file, find_matching_files, get_output_file_path,
-        get_cached_content, create_cache_for_file
-    )
-    from .api_service import condense_novel_gemini, condense_novel_openai, print_processing_stats
-    from .stats import statistics, reset_statistics, update_file_stats, finalize_statistics, print_processing_summary
-    from ..utils import setup_logger
-except ImportError:
-    import config
-    from key_manager import APIKeyManager
-    from file_utils import (
-        read_file, is_directory_file, save_condensed_novel, 
-        save_directory_file, find_matching_files, get_output_file_path,
-        get_cached_content, create_cache_for_file
-    )
-    from api_service import condense_novel_gemini, condense_novel_openai, print_processing_stats
-    from stats import statistics, reset_statistics, update_file_stats, finalize_statistics, print_processing_summary
-    from utils import setup_logger
+from . import config
+from .key_manager import APIKeyManager
+from .file_utils import (
+    read_file, is_directory_file, save_condensed_novel,
+    save_directory_file, find_matching_files, get_output_file_path,
+    get_cached_content, create_cache_for_file
+)
+from .api_service import condense_novel_gemini, condense_novel_openai, print_processing_stats
+from .stats import statistics, reset_statistics, update_file_stats, finalize_statistics, print_processing_summary
+from ..utils import setup_logger
 
 # 创建日志记录器
 logger = setup_logger(__name__)
 
-# 全局变量
+# 全局变量（兼容层）：新路径优先通过参数/实例属性传递 output_dir。
 OUTPUT_DIR = None
 
 class NovelCondenser:
     """小说脱水处理器类，处理小说文件的脱水流程"""
     
-    def __init__(self, api_type="gemini", workers=1, force_regenerate=False):
+    def __init__(
+        self,
+        api_type="gemini",
+        workers=1,
+        force_regenerate=False,
+        output_dir=None,
+        min_condensation_ratio=None,
+        max_condensation_ratio=None,
+        target_condensation_ratio=None,
+    ):
         """初始化小说脱水处理器"""
         self.api_type = api_type.lower()
         self.workers = workers
         self.force_regenerate = force_regenerate
+        self.output_dir = output_dir
         self.gemini_key_manager = None
         self.openai_key_manager = None
+
+        # 将“每次运行的比例覆盖”收口到 core，避免 GUI 线程直接写 config.*。
+        if min_condensation_ratio is not None:
+            config.MIN_CONDENSATION_RATIO = min_condensation_ratio
+        if max_condensation_ratio is not None:
+            config.MAX_CONDENSATION_RATIO = max_condensation_ratio
+        if target_condensation_ratio is not None:
+            config.TARGET_CONDENSATION_RATIO = target_condensation_ratio
         
         # 初始化API密钥管理器
         if not config.load_api_config():
@@ -376,7 +382,7 @@ class NovelCondenser:
         # 获取开始时间和文件名
         start_time = time.time()
         base_name = os.path.basename(file_path)
-        output_file = get_output_file_path(file_path)
+        output_file = get_output_file_path(file_path, output_dir=self.output_dir)
         
         # 显示处理信息
         self._log_process_info(file_path, file_index, total_files, retry_attempt)
@@ -428,8 +434,8 @@ class NovelCondenser:
         # 5. 处理结果
         if success and result:
             # 保存脱水后的内容并创建缓存
-            save_condensed_novel(file_path, result)
-            create_cache_for_file(content, result, file_path)
+            save_condensed_novel(file_path, result, output_dir=self.output_dir)
+            create_cache_for_file(content, result, file_path, output_dir=self.output_dir)
             
             # 更新统计信息
             condensation_ratio = (len(result) / len(content)) * 100 if len(content) > 0 else 0
@@ -454,7 +460,7 @@ class NovelCondenser:
             logger.error(f"处理失败: {base_name}")
             
             try:
-                save_condensed_novel(file_path, error_msg)
+                save_condensed_novel(file_path, error_msg, output_dir=self.output_dir)
             except:
                 pass
             
@@ -510,10 +516,10 @@ class NovelCondenser:
         
         # 尝试使用缓存
         if not self.force_regenerate:
-            cached_content = get_cached_content(file_path)
+            cached_content = get_cached_content(file_path, output_dir=self.output_dir)
             if cached_content:
                 logger.info(f"使用缓存的处理结果: {base_name}")
-                save_condensed_novel(file_path, cached_content)
+                save_condensed_novel(file_path, cached_content, output_dir=self.output_dir)
                 self._update_stats(
                     file_path, "success-cached", start_time, retry_attempt,
                     original_length=len(content), condensed_length=len(cached_content)
@@ -523,14 +529,14 @@ class NovelCondenser:
         # 检查是否是目录文件
         if is_directory_file(content):
             logger.info(f"检测到目录文件，直接保存: {base_name}")
-            save_directory_file(file_path)
+            save_directory_file(file_path, output_dir=self.output_dir)
             self._update_stats(file_path, "success-directory", start_time, retry_attempt)
             return True, content
         
         # 检查内容是否需要处理（太短的内容不处理）
         if len(content) < 100:
             logger.info(f"内容太短，不需要脱水: {base_name}")
-            save_condensed_novel(file_path, content)
+            save_condensed_novel(file_path, content, output_dir=self.output_dir)
             self._update_stats(file_path, "success-short", start_time, retry_attempt)
             return True, content
         
@@ -688,13 +694,11 @@ def parse_and_find_files():
         os.makedirs(OUTPUT_DIR, exist_ok=True)
         logger.info(f"输出目录: {OUTPUT_DIR}")
         
-        # 更新输出目录到其他模块
+        # 更新输出目录到 file_utils（避免 sys.modules 注入）
         try:
-            if 'file_utils' in sys.modules:
-                sys.modules['file_utils'].OUTPUT_DIR = OUTPUT_DIR
-            elif 'novel_condenser.file_utils' in sys.modules:
-                sys.modules['novel_condenser.file_utils'].OUTPUT_DIR = OUTPUT_DIR
-        except:
+            from . import file_utils as _file_utils_module
+            _file_utils_module.OUTPUT_DIR = OUTPUT_DIR
+        except Exception:
             pass
     
     # 测试模式只处理前5个文件
@@ -762,13 +766,32 @@ def main():
     return 0 if len(failed_files) == 0 else 1
 
 # 添加兼容层 - 为了保持与旧API的兼容性
-def process_single_file(file_path, api_type="gemini", api_key_config=None, file_index=None, total_files=None, retry_attempt=0, force_regenerate=False):
+def process_single_file(
+    file_path,
+    api_type="gemini",
+    api_key_config=None,
+    file_index=None,
+    total_files=None,
+    retry_attempt=0,
+    force_regenerate=False,
+    output_dir=None,
+    min_condensation_ratio=None,
+    max_condensation_ratio=None,
+    target_condensation_ratio=None,
+):
     """兼容层函数 - 处理单个文件
     
     此函数是为了保持与旧版API的兼容性而添加的，内部调用NovelCondenser.process_single_file方法
     """
     # 创建一个临时的NovelCondenser实例
-    condenser = NovelCondenser(api_type=api_type, force_regenerate=force_regenerate)
+    condenser = NovelCondenser(
+        api_type=api_type,
+        force_regenerate=force_regenerate,
+        output_dir=output_dir,
+        min_condensation_ratio=min_condensation_ratio,
+        max_condensation_ratio=max_condensation_ratio,
+        target_condensation_ratio=target_condensation_ratio,
+    )
     
     # 调用实例方法处理文件
     return condenser.process_single_file(
@@ -778,19 +801,38 @@ def process_single_file(file_path, api_type="gemini", api_key_config=None, file_
         retry_attempt=retry_attempt
     )
 
-def process_files_concurrently(file_paths, max_workers, api_type="gemini", force_regenerate=False, update_progress_func=None):
+def process_files_concurrently(
+    file_paths,
+    max_workers,
+    api_type="gemini",
+    force_regenerate=False,
+    update_progress_func=None,
+    output_dir=None,
+    stop_event=None,
+    min_condensation_ratio=None,
+    max_condensation_ratio=None,
+    target_condensation_ratio=None,
+):
     """兼容层函数 - 并发处理文件
     
     此函数是为了保持与旧版API的兼容性而添加的，内部调用NovelCondenser._process_files_concurrently方法
     """
     # 创建一个临时的NovelCondenser实例
-    condenser = NovelCondenser(api_type=api_type, workers=max_workers, force_regenerate=force_regenerate)
+    condenser = NovelCondenser(
+        api_type=api_type,
+        workers=max_workers,
+        force_regenerate=force_regenerate,
+        output_dir=output_dir,
+        min_condensation_ratio=min_condensation_ratio,
+        max_condensation_ratio=max_condensation_ratio,
+        target_condensation_ratio=target_condensation_ratio,
+    )
     
     # 获取文件总数
     total_files = len(file_paths)
     
     # 为GUI停止按钮暴露一个可设置的停止事件
-    stop_event = threading.Event()
+    stop_event = stop_event or threading.Event()
     try:
         # 将事件挂在函数对象上，方便外部通过引用设置
         process_files_concurrently.progress_stopped = stop_event

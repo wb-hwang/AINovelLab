@@ -16,6 +16,7 @@ import ebooklib
 from ebooklib import epub
 from bs4 import BeautifulSoup
 
+from .utils import get_safe_filename
 
 # 配置日志系统
 def setup_logger(log_level=logging.INFO):
@@ -119,34 +120,6 @@ def extract_title_from_html(html_content):
     
     # 如果未找到标题，返回None
     return None
-
-
-def get_safe_filename(text, max_length=50):
-    """
-    将文本转换为安全的文件名
-    
-    Args:
-        text: 原始文本
-        max_length: 文件名最大长度，默认50
-    
-    Returns:
-        str: 处理后的安全文件名
-    """
-    if not text:
-        return "unnamed"
-        
-    # 移除不适合作为文件名的字符
-    unsafe_chars = r'[\\/*?:"<>|]'
-    safe_text = re.sub(unsafe_chars, '', text)
-    
-    # 替换空白字符为下划线
-    safe_text = re.sub(r'\s+', '_', safe_text)
-    
-    # 限制长度，避免文件名过长
-    if len(safe_text) > max_length:
-        safe_text = safe_text[:max_length-3] + '...'
-        
-    return safe_text
 
 
 def get_spine_order(book):

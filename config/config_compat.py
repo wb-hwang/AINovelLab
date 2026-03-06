@@ -28,5 +28,5 @@ def ensure_config_importable():
     
     return True
 
-# 在导入时自动执行
-ensure_config_importable() 
+# 说明：不在 import 时自动修改 sys.path，避免深层模块产生隐式副作用。
+# 如确有需要，请在入口（例如 run.py）显式调用 ensure_config_importable()。

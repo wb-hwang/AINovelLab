@@ -7,8 +7,8 @@ API测试标签页 - 简单测试配置文件中的API连接状态
 import json
 import os
 import sys
-import requests
 import threading
+import logging
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
                            QPushButton, QGroupBox, QTableWidget, 
                            QTableWidgetItem, QHeaderView)
@@ -17,53 +17,18 @@ from PyQt5.QtGui import QColor
 from pathlib import Path
 import re
 
-# API配置
-GEMINI_API_CONFIG = []
-OPENAI_API_CONFIG = []
+from src.core.novel_condenser import config as core_config
+from src.core.novel_condenser import api_service as core_api_service
 
-# 查找配置文件路径
-def get_base_dir():
-    """获取基础目录路径，确保兼容不同的目录结构"""
-    # 当前文件所在目录
-    current_file_dir = os.path.dirname(os.path.abspath(__file__))
-    
-    # 从 src/gui 推断项目根目录
-    if os.path.basename(os.path.dirname(current_file_dir)) == 'src':
-        # src/gui 结构
-        return Path(os.path.dirname(os.path.dirname(current_file_dir)))
-    
-    # 如果是打包的exe
-    if getattr(sys, 'frozen', False):
-        exe_dir = os.path.dirname(sys.executable)
-        return Path(exe_dir)
-    
-    # 默认返回当前目录的上两级
-    return Path(os.path.dirname(os.path.dirname(current_file_dir)))
+logger = logging.getLogger(__name__)
+
+# API配置（复用 core_config 的全局列表；core_config 已改为 in-place 更新，引用稳定）
+GEMINI_API_CONFIG = core_config.GEMINI_API_CONFIG
+OPENAI_API_CONFIG = core_config.OPENAI_API_CONFIG
 
 def get_config_file_path():
     """获取配置文件路径"""
-    base_dir = get_base_dir()
-    
-    # 按优先级检查配置文件位置
-    possible_paths = [
-        os.path.join(base_dir, "api_keys.json"),
-        os.path.join(base_dir, "config", "api_keys.json"),
-    ]
-    
-    # 如果是打包的exe，优先检查exe所在目录
-    if getattr(sys, 'frozen', False):
-        exe_dir = os.path.dirname(sys.executable)
-        possible_paths.insert(0, os.path.join(exe_dir, "api_keys.json"))
-    
-    print(f"可能的配置文件路径:")
-    for path in possible_paths:
-        exists = os.path.exists(path)
-        print(f"  - {path} {'(存在)' if exists else '(不存在)'}")
-        if exists:
-            return path
-    
-    # 默认返回第一个路径
-    return possible_paths[0]
+    return core_config.get_config_file_path()
 
 def load_api_config():
     """加载API配置
@@ -71,36 +36,10 @@ def load_api_config():
     Returns:
         bool: 配置加载是否成功
     """
-    global GEMINI_API_CONFIG, OPENAI_API_CONFIG
-    
-    config_file_path = get_config_file_path()
-    print(f"使用配置文件路径: {config_file_path}")
-    
-    if not os.path.exists(config_file_path):
-        print(f"配置文件不存在: {config_file_path}")
-        return False
-    
-    try:
-        with open(config_file_path, 'r', encoding='utf-8') as f:
-            config_data = json.load(f)
-            
-        # 加载Gemini API配置
-        if 'gemini_api' in config_data and isinstance(config_data['gemini_api'], list):
-            GEMINI_API_CONFIG = config_data['gemini_api']
-            print(f"已加载 {len(GEMINI_API_CONFIG)} 个Gemini API配置")
-        
-        # 加载OpenAI API配置
-        if 'openai_api' in config_data and isinstance(config_data['openai_api'], list):
-            OPENAI_API_CONFIG = config_data['openai_api']
-            print(f"已加载 {len(OPENAI_API_CONFIG)} 个OpenAI API配置")
-            
-        # 至少有一种API配置加载成功即可
-        return len(GEMINI_API_CONFIG) > 0 or len(OPENAI_API_CONFIG) > 0
-            
-    except Exception as e:
-        print(f"加载配置文件失败: {e}")
-        
-    return False 
+    ok = core_config.load_api_config()
+    if not ok:
+        logger.warning(f"加载配置文件失败或未找到有效配置: {get_config_file_path()}")
+    return ok
 
 # 初始加载配置
 load_api_config()
@@ -114,12 +53,12 @@ class ApiTestTab(QWidget):
     
     def __init__(self, parent=None):
         super().__init__(parent)
-        # 打印当前环境信息
-        print(f"当前工作目录: {os.getcwd()}")
-        print(f"是否打包为exe: {getattr(sys, 'frozen', False)}")
+        # 记录环境信息（避免 stdout 污染）
+        logger.debug(f"当前工作目录: {os.getcwd()}")
+        logger.debug(f"是否打包为exe: {getattr(sys, 'frozen', False)}")
         if getattr(sys, 'frozen', False):
-            print(f"exe路径: {sys.executable}")
-            print(f"exe目录: {os.path.dirname(sys.executable)}")
+            logger.debug(f"exe路径: {sys.executable}")
+            logger.debug(f"exe目录: {os.path.dirname(sys.executable)}")
         
         self.signals = ApiTestSignals()
         self.signals.test_complete.connect(self.on_test_complete)
@@ -203,8 +142,8 @@ class ApiTestTab(QWidget):
         self.api_table.setRowCount(0)  # 清空表格
         
         # 打印当前配置状态
-        print(f"Gemini API配置数量: {len(GEMINI_API_CONFIG)}")
-        print(f"OpenAI API配置数量: {len(OPENAI_API_CONFIG)}")
+        logger.debug(f"Gemini API配置数量: {len(GEMINI_API_CONFIG)}")
+        logger.debug(f"OpenAI API配置数量: {len(OPENAI_API_CONFIG)}")
         
         row = 0
         api_count = 0
@@ -215,7 +154,7 @@ class ApiTestTab(QWidget):
         # 添加Gemini API
         for i, api in enumerate(GEMINI_API_CONFIG):
             if not isinstance(api, dict) or "key" not in api:
-                print(f"跳过无效的gemini_api配置 #{i}: {api}")
+                logger.debug(f"跳过无效的gemini_api配置 #{i}: {api}")
                 continue
             
             model_name = api.get("model", "未指定")
@@ -237,13 +176,13 @@ class ApiTestTab(QWidget):
             
             # 检查是否已添加过相同的API
             if api_identifier in added_apis:
-                print(f"跳过重复的API: {api_identifier}")
+                logger.debug(f"跳过重复的API: {api_identifier}")
                 continue
             
             added_apis.add(api_identifier)
             api_count += 1
             
-            print(f"添加Gemini API #{i}, 模型: {model_name}, 域名: {url_domain}")
+            logger.debug(f"添加Gemini API #{i}, 模型: {model_name}, 域名: {url_domain}")
             self.api_table.insertRow(row)
             
             # API类型
@@ -282,7 +221,7 @@ class ApiTestTab(QWidget):
         # 添加OpenAI API (如果存在)
         for i, api in enumerate(OPENAI_API_CONFIG):
             if not isinstance(api, dict) or "key" not in api:
-                print(f"跳过无效的openai_api配置 #{i}: {api}")
+                logger.debug(f"跳过无效的openai_api配置 #{i}: {api}")
                 continue
             
             model_name = api.get("model", "未指定")
@@ -304,13 +243,13 @@ class ApiTestTab(QWidget):
             
             # 检查是否已添加过相同的API
             if api_identifier in added_apis:
-                print(f"跳过重复的API: {api_identifier}")
+                logger.debug(f"跳过重复的API: {api_identifier}")
                 continue
             
             added_apis.add(api_identifier)
             api_count += 1
             
-            print(f"添加OpenAI API #{i}, 模型: {model_name}, 域名: {url_domain}")
+            logger.debug(f"添加OpenAI API #{i}, 模型: {model_name}, 域名: {url_domain}")
             self.api_table.insertRow(row)
             
             # API类型
@@ -346,7 +285,7 @@ class ApiTestTab(QWidget):
             
             row += 1
         
-        print(f"总共添加了 {api_count} 个API, 行数: {row}")
+        logger.debug(f"总共添加了 {api_count} 个API, 行数: {row}")
         
         # 如果没有API配置，添加提示行
         if api_count == 0:
@@ -364,7 +303,7 @@ class ApiTestTab(QWidget):
         """重新加载API密钥配置"""
         # 重新加载配置
         load_api_config()
-        print(f"重新加载配置完成")
+        logger.info("重新加载配置完成")
         
         # 更新配置文件路径显示
         for i in range(self.layout().count()):
@@ -380,7 +319,7 @@ class ApiTestTab(QWidget):
         """测试所有API - 改进版，使用任务队列确保所有测试都能执行"""
         # 如果已经在测试中，不执行新的测试批次
         if self.testing_all:
-            print("已有测试正在进行中，请等待完成")
+            logger.info("已有测试正在进行中，请等待完成")
             return
             
         # 设置测试状态
@@ -558,335 +497,33 @@ class ApiTestTab(QWidget):
         thread.start()
     
     def _test_api_connection(self, api_id, api_type, api_key, api_model):
-        """在后台线程中测试API连接，参考api_service.py的实现"""
+        """在后台线程中测试API连接（复用 core api_service 的请求/解析逻辑）。"""
         try:
-            # 从api_id中提取API索引和行索引
             parts = api_id.split("_")
-            if len(parts) == 3:  # 新格式: type_index_row
+            if len(parts) >= 2:
                 api_index = int(parts[1])
-                row_index = int(parts[2])
-            else:  # 旧格式兼容: type_index
-                api_index = int(parts[1])
-                row_index = -1
-            
-            if api_type == "gemini":
-                # 测试Gemini API
-                # 获取更多参数
-                api_config = None
-                
-                # 确保索引有效，防止索引越界
-                if 0 <= api_index < len(GEMINI_API_CONFIG):
-                    api_config = GEMINI_API_CONFIG[api_index]
-                else:
-                    self.signals.test_complete.emit(api_id, False, "API配置无效：索引超出范围")
-                    return
-                    
-                redirect_url = api_config.get('redirect_url', '')
-                
-                # 构建正确的API URL格式
-                # 优先使用配置的redirect_url，如果没有则使用默认URL
-                final_api_url = ""
-                
-                # 针对官方Google API的正规URL格式
-                if redirect_url:
-                    # 使用配置的重定向URL
-                    final_api_url = redirect_url
-                    
-                    # 如果URL不包含:generateContent后缀，添加模型和方法
-                    if ":generateContent" not in final_api_url:
-                        # 确保URL末尾有斜杠
-                        if not final_api_url.endswith('/'):
-                            final_api_url += '/'
-                        
-                        # 添加模型名和方法
-                        final_api_url += f"{api_model}:generateContent"
-                else:
-                    # 使用默认URL
-                    final_api_url = f"https://generativelanguage.googleapis.com/v1beta/models/{api_model}:generateContent"
-                
-                # 构建请求头
-                headers = {
-                    "Content-Type": "application/json"
-                }
-                
-                # 处理API密钥参数
-                if "key=" not in final_api_url:
-                    # 如果URL中没有key参数，根据不同情况处理
-                    if "aliyahzombie" in redirect_url:
-                        # 使用自定义标头
-                        headers["x-goog-api-key"] = api_key
-                    elif redirect_url and "generativelanguage.googleapis.com" not in redirect_url:
-                        # 对于非官方Google API，添加到请求头
-                        headers["x-goog-api-key"] = api_key
-                    else:
-                        # 对于官方Google API，添加到URL
-                        if "?" in final_api_url:
-                            final_api_url += f"&key={api_key}"
-                        else:
-                            final_api_url += f"?key={api_key}"
-                
-                # 打印请求信息，帮助诊断
-                print(f"Gemini API测试URL: {final_api_url}")
-                
-                # 构建请求体
-                request_data = {
-                    "contents": [
-                        {
-                            "parts": [
-                                {"text": "你好，这是API测试消息。请用一句话回复。"}
-                            ]
-                        }
-                    ],
-                    "generationConfig": {
-                        "temperature": 0.2,
-                        "maxOutputTokens": 50
-                    }
-                }
-                
-                # 打印请求信息，帮助诊断
-                print(f"请求头: {headers}")
-                print(f"请求体示例: {json.dumps(request_data, ensure_ascii=False)[:100]}...")
-                
-                try:
-                    # 发送请求
-                    response = requests.post(final_api_url, headers=headers, json=request_data, timeout=30)
-                    response.raise_for_status()  # 这会在HTTP错误时抛出异常
-                    
-                    # 检查响应是否包含预期的结构
-                    resp_json = response.json()
-                    print(f"响应状态码: {response.status_code}")
-                    print(f"响应头: {response.headers}")
-                    print(f"响应体示例: {json.dumps(resp_json, ensure_ascii=False)[:100]}...")
-                    
-                    # 增强的响应检测逻辑，支持多种不同的响应格式
-                    success = False
-                    
-                    # 标准Gemini格式
-                    if "candidates" in resp_json and len(resp_json["candidates"]) > 0:
-                        success = True
-                    
-                    # 一些第三方API使用不同的响应格式
-                    elif "response" in resp_json:
-                        success = True
-                    
-                    # 某些代理使用output字段
-                    elif "output" in resp_json:
-                        success = True
-                    
-                    # 某些API直接返回内容数组
-                    elif "results" in resp_json:
-                        success = True
-                    
-                    # 某些API将结果封装在data字段中
-                    elif "data" in resp_json:
-                        data = resp_json["data"]
-                        if isinstance(data, dict) and ("candidates" in data or "content" in data):
-                            success = True
-                    
-                    # 某些API使用content作为直接返回
-                    elif "content" in resp_json:
-                        success = True
-                    
-                    # 有效响应
-                    if success:
-                        self.signals.test_complete.emit(api_id, True, "")
-                    else:
-                        # 如果没有找到有效结构，但HTTP响应是200，认为是成功的
-                        if response.status_code == 200:
-                            print("没有找到标准的响应字段，但HTTP状态为200，认为API可用")
-                            self.signals.test_complete.emit(api_id, True, "")
-                        else:
-                            self.signals.test_complete.emit(api_id, False, "API响应格式不正确，未找到有效的响应字段")
-                except requests.exceptions.HTTPError as e:
-                    error_msg = str(e)
-                    status_code = e.response.status_code if hasattr(e, 'response') else "未知"
-                    
-                    # 尝试获取更详细的错误信息
-                    try:
-                        error_text = e.response.text
-                        print(f"错误响应: {error_text}")
-                        error_json = e.response.json()
-                        print(f"错误JSON: {json.dumps(error_json, ensure_ascii=False)}")
-                        if "error" in error_json:
-                            if "message" in error_json["error"]:
-                                error_msg = error_json["error"]["message"]
-                            elif "msg" in error_json["error"]:
-                                error_msg = error_json["error"]["msg"]
-                    except:
-                        pass
-                        
-                    self.signals.test_complete.emit(api_id, False, f"HTTP错误 {status_code}: {error_msg}")
-                    return
-                except (requests.exceptions.ConnectionError, requests.exceptions.Timeout, 
-                       requests.exceptions.RequestException, json.JSONDecodeError) as e:
-                    # 统一处理常见异常
-                    error_type = type(e).__name__
-                    self.signals.test_complete.emit(api_id, False, f"{error_type}: {str(e)}")
-                    return
-            
-            elif api_type == "openai":
-                # 测试OpenAI API
-                # 获取更多参数
-                api_config = None
-                
-                # 确保索引有效，防止索引越界
-                if 0 <= api_index < len(OPENAI_API_CONFIG):
-                    api_config = OPENAI_API_CONFIG[api_index]
-                else:
-                    self.signals.test_complete.emit(api_id, False, "API配置无效：索引超出范围")
-                    return
-                    
-                redirect_url = api_config.get('redirect_url', '')
-                
-                # 构建正确的API URL格式 - 避免添加额外的路径
-                if redirect_url:
-                    # 使用提供的redirect_url作为完整URL
-                    final_api_url = redirect_url.strip()
-                    print(f"原始redirect_url: {redirect_url}")
-                    
-                    # 检查URL是否已经包含chat/completions路径
-                    if 'chat/completions' in final_api_url:
-                        # URL已经包含了必要的路径，确保没有末尾斜杠
-                        if final_api_url.endswith('/') and not final_api_url.endswith('/?'):
-                            # 移除末尾的斜杠（但保留查询字符串中的斜杠）
-                            final_api_url = final_api_url.rstrip('/')
-                    else:
-                        # URL不包含必要的路径，需要添加
-                        # 首先移除末尾的斜杠（如果有）
-                        final_api_url = final_api_url.rstrip('/')
-                        # 添加chat/completions路径
-                        final_api_url += '/chat/completions'
-                else:
-                    # 使用官方OpenAI端点
-                    final_api_url = "https://api.openai.com/v1/chat/completions"
-                
-                print(f"最终OpenAI API测试URL: {final_api_url}")
-                
-                # 构建OpenAI格式的请求体
-                request_data = {
-                    "model": api_model,
-                    "messages": [
-                        {
-                            "role": "user",
-                            "content": "你好，这是API测试消息。请用一句话回复。"
-                        }
-                    ],
-                    "temperature": 0.2,
-                    "max_tokens": 50
-                }
-                
-                # 构建请求头
-                headers = {
-                    "Content-Type": "application/json",
-                    "Authorization": f"Bearer {api_key}"
-                }
-                
-                # 添加基本的User-Agent，提高兼容性
-                headers["User-Agent"] = "Mozilla/5.0 OpenAI API Test Client"
-                
-                # 打印请求信息，帮助诊断
-                print(f"请求URL: {final_api_url}")
-                print(f"请求头: {headers}")
-                print(f"请求体: {json.dumps(request_data, ensure_ascii=False)}")
-                
-                try:
-                    # 对于第三方API增加超时时间，它们通常响应较慢
-                    timeout = 60 if redirect_url and not "openai.com" in redirect_url else 30
-                    print(f"设置请求超时: {timeout}秒")
-                    
-                    response = requests.post(final_api_url, headers=headers, json=request_data, timeout=timeout)
-                    response.raise_for_status()  # 这会在HTTP错误时抛出异常
-                    
-                    # 检查响应是否包含预期的结构
-                    resp_json = response.json()
-                    print(f"响应状态码: {response.status_code}")
-                    print(f"响应头: {response.headers}")
-                    print(f"响应体示例: {json.dumps(resp_json, ensure_ascii=False)[:100]}...")
-                    
-                    # 增强的响应检测逻辑，支持多种不同的响应格式
-                    success = False
-                    
-                    # 标准OpenAI格式
-                    if "choices" in resp_json and len(resp_json["choices"]) > 0:
-                        success = True
-                    
-                    # 一些第三方API使用不同的响应格式
-                    elif "response" in resp_json:
-                        success = True
-                    
-                    # 某些代理使用output字段
-                    elif "output" in resp_json:
-                        success = True
-                    
-                    # 某些API直接返回内容数组
-                    elif "results" in resp_json:
-                        success = True
-                    
-                    # 某些API将结果封装在data字段中
-                    elif "data" in resp_json:
-                        data = resp_json["data"]
-                        if isinstance(data, dict) and ("choices" in data or "content" in data):
-                            success = True
-                    
-                    # 某些API使用content作为直接返回
-                    elif "content" in resp_json:
-                        success = True
-                    
-                    # 有效响应
-                    if success:
-                        self.signals.test_complete.emit(api_id, True, "")
-                    else:
-                        # 如果没有找到有效结构，但HTTP响应是200，认为是成功的
-                        if response.status_code == 200:
-                            print("没有找到标准的响应字段，但HTTP状态为200，认为API可用")
-                            self.signals.test_complete.emit(api_id, True, "")
-                        else:
-                            self.signals.test_complete.emit(api_id, False, "API响应格式不正确，未找到有效的响应字段")
-                except requests.exceptions.HTTPError as e:
-                    error_msg = str(e)
-                    status_code = e.response.status_code if hasattr(e, 'response') else "未知"
-                    
-                    # 尝试获取更详细的错误信息
-                    try:
-                        error_text = e.response.text
-                        print(f"错误响应: {error_text}")
-                        error_json = e.response.json()
-                        print(f"错误JSON: {json.dumps(error_json, ensure_ascii=False)}")
-                        if "error" in error_json:
-                            if "message" in error_json["error"]:
-                                error_msg = error_json["error"]["message"]
-                            elif "msg" in error_json["error"]:
-                                error_msg = error_json["error"]["msg"]
-                    except:
-                        # 如果无法解析JSON，至少尝试获取响应文本
-                        if hasattr(e, 'response') and hasattr(e.response, 'text'):
-                            error_msg = f"{error_msg} - 响应: {e.response.text[:100]}"
-                    
-                    # 处理HTTP 404错误 - 可能是API路径不正确
-                    if status_code == 404:
-                        error_msg = f"API URL路径可能不正确({final_api_url})，请检查URL配置。错误: {error_msg}"
-                    
-                    self.signals.test_complete.emit(api_id, False, f"HTTP错误 {status_code}: {error_msg}")
-                    return
-                except (requests.exceptions.ConnectionError, requests.exceptions.Timeout, 
-                       requests.exceptions.RequestException, json.JSONDecodeError) as e:
-                    # 统一处理常见异常
-                    error_type = type(e).__name__
-                    self.signals.test_complete.emit(api_id, False, f"{error_type}: {str(e)}")
-                    return
-            
             else:
-                # 不支持的API类型
+                self.signals.test_complete.emit(api_id, False, "API标识无效")
+                return
+
+            if api_type == "gemini":
+                configs = GEMINI_API_CONFIG
+            elif api_type == "openai":
+                configs = OPENAI_API_CONFIG
+            else:
                 self.signals.test_complete.emit(api_id, False, f"不支持的API类型: {api_type}")
                 return
-        
+
+            if not (0 <= api_index < len(configs)):
+                self.signals.test_complete.emit(api_id, False, "API配置无效：索引超出范围")
+                return
+
+            api_config = configs[api_index]
+            ok, err = core_api_service.test_api_key(api_type, api_config)
+            self.signals.test_complete.emit(api_id, ok, err)
         except Exception as e:
-            # 捕获所有未处理的异常，确保测试完成信号始终被发送
-            import traceback
-            print(f"API测试过程中发生未预期的异常: {str(e)}")
-            print(traceback.format_exc())
             self.signals.test_complete.emit(api_id, False, f"测试出错: {str(e)}")
-    
+
     def on_test_complete(self, api_id, success, error_message):
         """测试完成后的回调"""
         # 解析API ID
@@ -998,7 +635,7 @@ class ApiTestTab(QWidget):
         
         # 如果始终找不到行，记录错误信息
         if not row_found:
-            print(f"警告: 无法找到匹配的表格行更新API测试状态: {api_id}, 类型:{api_type}, 模型:{api_model}")
+            logger.warning(f"无法找到匹配的表格行更新API测试状态: {api_id}, 类型:{api_type}, 模型:{api_model}")
         
         # 如果是在"测试全部"模式中，更新计数并继续测试
         if self.testing_all:
@@ -1031,7 +668,7 @@ class ApiTestTab(QWidget):
                 pending_rows.append(row)
         
         if pending_rows:
-            print(f"发现 {len(pending_rows)} 行显示为'等待测试...'但测试队列已空")
+            logger.warning(f"发现 {len(pending_rows)} 行显示为'等待测试...'但测试队列已空")
             
             # 将这些行标记为"测试状态未知"
             for row in pending_rows:
