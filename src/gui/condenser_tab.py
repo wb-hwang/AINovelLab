@@ -8,7 +8,8 @@ import os
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
                            QFileDialog, QMessageBox, QProgressBar, QTextEdit,
                            QSpinBox, QGroupBox, QLineEdit, QCheckBox, QComboBox, QFrame,
-                           QDialog, QDialogButtonBox, QSplitter, QTabWidget)
+                           QDialog, QDialogButtonBox, QSplitter, QTabWidget,
+                           QTableWidget, QTableWidgetItem, QHeaderView)
 from PyQt5.QtCore import pyqtSignal, Qt
 from PyQt5.QtGui import QFont
 
@@ -272,10 +273,16 @@ class CondenserTab(QWidget):
         self.clear_log_button.setObjectName("clear_log_button")
         style_button(self.clear_log_button, "ghost")
         self.clear_log_button.clicked.connect(self.clear_log)
+
+        self.key_stats_button = QPushButton("Key状态")
+        self.key_stats_button.setObjectName("key_stats_button")
+        style_button(self.key_stats_button, "ghost")
+        self.key_stats_button.clicked.connect(self.show_key_runtime_status)
         
         wrap_layout.addWidget(self.wrap_checkbox)
         wrap_layout.addStretch()
         wrap_layout.addWidget(self.clear_log_button)
+        wrap_layout.addWidget(self.key_stats_button)
         
         # 添加开始脱水按钮到日志框下方
         self.start_button = QPushButton("开始脱水")
@@ -327,6 +334,93 @@ class CondenserTab(QWidget):
     def clear_log(self):
         """清除日志显示区域的内容"""
         self.log_text.clear()
+
+    def _collect_key_runtime_stats(self):
+        stats = []
+        gemini_manager = getattr(main_module, "gemini_key_manager", None)
+        openai_manager = getattr(main_module, "openai_key_manager", None)
+
+        if gemini_manager is not None:
+            stats.extend(gemini_manager.get_runtime_stats("Gemini"))
+        if openai_manager is not None:
+            stats.extend(openai_manager.get_runtime_stats("OpenAI"))
+        return stats
+
+    def _create_key_status_dialog(self, stats):
+        dialog = QDialog(self)
+        dialog.setWindowTitle("API Key 运行状态")
+        dialog.resize(920, 420)
+
+        layout = QVBoxLayout(dialog)
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setSpacing(10)
+
+        description = QLabel("显示当前任务周期内每个配置实例的状态、实际并发、配置并发、成功/失败请求统计。")
+        description.setWordWrap(True)
+        description.setObjectName("mutedMeta")
+        layout.addWidget(description)
+
+        table = QTableWidget(len(stats), 8)
+        table.setAlternatingRowColors(True)
+        table.setEditTriggers(QTableWidget.NoEditTriggers)
+        table.setSelectionMode(QTableWidget.NoSelection)
+        table.verticalHeader().setVisible(False)
+        table.setHorizontalHeaderLabels([
+            "API类型",
+            "名称",
+            "本次任务状态",
+            "实际并发数",
+            "配置并发数",
+            "成功请求数",
+            "失败请求数",
+            "成功率",
+        ])
+        table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
+        table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
+        table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeToContents)
+        table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeToContents)
+        table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeToContents)
+        table.horizontalHeader().setSectionResizeMode(6, QHeaderView.ResizeToContents)
+        table.horizontalHeader().setSectionResizeMode(7, QHeaderView.ResizeToContents)
+
+        for row, item in enumerate(stats):
+            values = [
+                item.get("api_type", ""),
+                item.get("name", ""),
+                item.get("status", ""),
+                str(item.get("active_concurrency", 0)),
+                str(item.get("configured_concurrency", 0)),
+                str(item.get("success_count", 0)),
+                str(item.get("error_count", 0)),
+                f"{item.get('success_rate', 0)}%",
+            ]
+            for column, value in enumerate(values):
+                cell = QTableWidgetItem(value)
+                if column != 1:
+                    cell.setTextAlignment(Qt.AlignCenter)
+                table.setItem(row, column, cell)
+
+        layout.addWidget(table, 1)
+
+        button_box = QDialogButtonBox(QDialogButtonBox.Close)
+        close_button = button_box.button(QDialogButtonBox.Close)
+        if close_button:
+            close_button.setText("关闭")
+            style_button(close_button, "secondary")
+        button_box.rejected.connect(dialog.reject)
+        button_box.accepted.connect(dialog.accept)
+        layout.addWidget(button_box)
+        return dialog
+
+    def show_key_runtime_status(self):
+        stats = self._collect_key_runtime_stats()
+        if not stats:
+            QMessageBox.information(self, "暂无数据", "当前还没有可展示的 Key 运行状态。\n请先开始一次脱水任务。")
+            return
+
+        dialog = self._create_key_status_dialog(stats)
+        dialog.exec_()
 
     def refresh_summary(self):
         """刷新顶部摘要信息。"""
@@ -475,8 +569,7 @@ class CondenserTab(QWidget):
             if hasattr(config, 'GEMINI_API_CONFIG') and config.GEMINI_API_CONFIG:
                 try:
                     main_module.gemini_key_manager = key_manager.APIKeyManager(
-                        config.GEMINI_API_CONFIG,
-                        config.DEFAULT_MAX_RPM
+                        config.GEMINI_API_CONFIG
                     )
                     gemini_initialized = True
                 except Exception as e:
@@ -493,8 +586,7 @@ class CondenserTab(QWidget):
             if hasattr(config, 'OPENAI_API_CONFIG') and config.OPENAI_API_CONFIG:
                 try:
                     main_module.openai_key_manager = key_manager.APIKeyManager(
-                        config.OPENAI_API_CONFIG,
-                        config.DEFAULT_MAX_RPM
+                        config.OPENAI_API_CONFIG
                     )
                     openai_initialized = True
                 except Exception as e:

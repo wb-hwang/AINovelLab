@@ -69,7 +69,7 @@ def _get_api_key_config(api_type: str, api_key_config: Optional[Dict] = None, ke
                     return None
                 
                 logger.warning(f"未找到现有的{api_type.capitalize()} API密钥管理器，创建临时管理器")
-                key_manager = APIKeyManager(api_configs, config.DEFAULT_MAX_RPM)
+                key_manager = APIKeyManager(api_configs)
     
     # 从key_manager获取API密钥配置
     api_key_config = key_manager.get_key_config() if key_manager else None
@@ -869,24 +869,26 @@ def _condense_novel_with_api(api_type: str, content: str, api_key_config: Option
         logger.warning("输入内容为空，无法处理")
         return ""
     
+    acquired_from_manager = api_key_config is None and key_manager is not None
     # 获取API密钥配置
     api_key_config = _get_api_key_config(api_type, api_key_config, key_manager)
     if api_key_config is None:
         return None
-    
-    # 从api_key_config中获取密钥信息
-    api_key = api_key_config.get('key', '')
-    redirect_url = api_key_config.get('redirect_url', '')
-    default_model = config.DEFAULT_GEMINI_MODEL if api_type == "gemini" else config.DEFAULT_OPENAI_MODEL
-    model = api_key_config.get('model', default_model)
-    
-    # 检查API密钥是否有效
-    if not api_key:
-        logger.error(f"{api_type.capitalize()} API密钥为空")
-        return None
-    
-    # 使用通用分块处理函数，传递自定义提示词模板
-    return _process_content_in_chunks(content, api_type, api_key, redirect_url, model, key_manager, custom_prompt_template)
+
+    try:
+        api_key = api_key_config.get('key', '')
+        redirect_url = api_key_config.get('redirect_url', '')
+        default_model = config.DEFAULT_GEMINI_MODEL if api_type == "gemini" else config.DEFAULT_OPENAI_MODEL
+        model = api_key_config.get('model', default_model)
+
+        if not api_key:
+            logger.error(f"{api_type.capitalize()} API密钥为空")
+            return None
+
+        return _process_content_in_chunks(content, api_type, api_key, redirect_url, model, key_manager, custom_prompt_template)
+    finally:
+        if acquired_from_manager and key_manager is not None:
+            key_manager.release_key(api_key_config)
 
 def _parse_llm_response(response_json: Dict, api_type: str = "gemini") -> Optional[str]:
     """解析LLM API响应，支持多种格式
@@ -1042,7 +1044,7 @@ def test_api_key(api_type: str, api_config: Dict[str, Any]) -> Tuple[bool, str]:
 
     Args:
         api_type: "gemini" 或 "openai"
-        api_config: 单条 API 配置（key/redirect_url/model/rpm...）
+        api_config: 单条 API 配置（key/redirect_url/model/concurrency...）
 
     Returns:
         (ok, error_message)

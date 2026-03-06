@@ -89,14 +89,13 @@ CONFIG_FILE_PATH = get_possible_config_paths()[0]  # 默认使用第一个路径
 # Gemini API 默认设置
 DEFAULT_GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/"
 DEFAULT_GEMINI_MODEL = "gemini-2.0-flash"
-DEFAULT_KEY_RPM = 5  # 每个密钥默认每分钟请求数
-DEFAULT_MAX_RPM = 20  # 默认全局最大每分钟请求数
-GEMINI_API_CONFIG = []  # 从配置文件加载，格式为 [{"key": "key1", "redirect_url": "url1", "model": "model1", "rpm": 5}, ...]
+DEFAULT_KEY_CONCURRENCY = 1  # 每个配置默认并发数
+GEMINI_API_CONFIG = []  # 从配置文件加载，格式为 [{"key": "key1", "redirect_url": "url1", "model": "model1", "concurrency": 1}, ...]
 
 # OpenAI API 默认设置
 DEFAULT_OPENAI_API_URL = "https://api.openai.com/v1/chat/completions"
 DEFAULT_OPENAI_MODEL = "gpt-3.5-turbo"
-OPENAI_API_CONFIG = []  # 从配置文件加载，格式为 [{"key": "key1", "redirect_url": "url1", "model": "model1", "rpm": 5}, ...]
+OPENAI_API_CONFIG = []  # 从配置文件加载，格式为 [{"key": "key1", "redirect_url": "url1", "model": "model1", "concurrency": 1}, ...]
 
 # 脱水比例常量
 MIN_CONDENSATION_RATIO = 30  # 最小压缩比例（百分比）
@@ -137,6 +136,28 @@ PROMPT_TEMPLATES = {
 # 配置加载函数
 # =========================================================
 
+
+def _normalize_api_config_item(item: Dict[str, Any]) -> Dict[str, Any]:
+    """规范化单条 API 配置，移除旧字段并补齐默认值。"""
+    normalized = dict(item or {})
+    if "name" not in normalized:
+        normalized["name"] = ""
+
+    concurrency = normalized.get("concurrency")
+    if not isinstance(concurrency, int) or concurrency < 1:
+        concurrency = DEFAULT_KEY_CONCURRENCY
+    normalized["concurrency"] = concurrency
+    normalized.pop("rpm", None)
+    normalized.pop("errors", None)
+    normalized.pop("consecutive_errors", None)
+    normalized.pop("cooling_until", None)
+    normalized.pop("_config_id", None)
+    return normalized
+
+
+def _normalize_api_config_list_data(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    return [_normalize_api_config_item(item) for item in items if isinstance(item, dict)]
+
 def load_api_config(config_path: Optional[str] = None) -> bool:
     """加载API密钥配置文件
     
@@ -146,7 +167,6 @@ def load_api_config(config_path: Optional[str] = None) -> bool:
     Returns:
         bool: 配置加载是否成功
     """
-    global DEFAULT_MAX_RPM
     global MIN_CONDENSATION_RATIO, MAX_CONDENSATION_RATIO, TARGET_CONDENSATION_RATIO
     global LLM_GENERATION_PARAMS, PROMPT_TEMPLATES
     
@@ -158,20 +178,16 @@ def load_api_config(config_path: Optional[str] = None) -> bool:
         # 加载Gemini API配置
         if hasattr(project_config, 'GEMINI_API_CONFIG'):
             try:
-                GEMINI_API_CONFIG[:] = list(project_config.GEMINI_API_CONFIG)
+                GEMINI_API_CONFIG[:] = _normalize_api_config_list_data(list(project_config.GEMINI_API_CONFIG))
             except Exception:
                 GEMINI_API_CONFIG[:] = []
         
         # 加载OpenAI API配置
         if hasattr(project_config, 'OPENAI_API_CONFIG'):
             try:
-                OPENAI_API_CONFIG[:] = list(project_config.OPENAI_API_CONFIG)
+                OPENAI_API_CONFIG[:] = _normalize_api_config_list_data(list(project_config.OPENAI_API_CONFIG))
             except Exception:
                 OPENAI_API_CONFIG[:] = []
-            
-        # 加载RPM配置
-        if hasattr(project_config, 'DEFAULT_MAX_RPM'):
-            DEFAULT_MAX_RPM = project_config.DEFAULT_MAX_RPM
             
         # 加载脱水比例配置
         if hasattr(project_config, 'MIN_CONDENSATION_RATIO'):
@@ -212,7 +228,6 @@ def _load_from_file(file_path: str) -> bool:
     Returns:
         bool: 加载是否成功
     """
-    global DEFAULT_MAX_RPM
     global MIN_CONDENSATION_RATIO, MAX_CONDENSATION_RATIO, TARGET_CONDENSATION_RATIO
     global LLM_GENERATION_PARAMS, PROMPT_TEMPLATES
     
@@ -226,25 +241,13 @@ def _load_from_file(file_path: str) -> bool:
         
         # 加载Gemini API配置    
         if 'gemini_api' in config_data and isinstance(config_data['gemini_api'], list):
-            GEMINI_API_CONFIG[:] = config_data['gemini_api']
-            # 确保每项存在 name 字段
-            for item in GEMINI_API_CONFIG:
-                if 'name' not in item:
-                    item['name'] = ""
+            GEMINI_API_CONFIG[:] = _normalize_api_config_list_data(config_data['gemini_api'])
             logger.info(f"加载了 {len(GEMINI_API_CONFIG)} 个Gemini API密钥")
         
         # 加载OpenAI API配置
         if 'openai_api' in config_data and isinstance(config_data['openai_api'], list):
-            OPENAI_API_CONFIG[:] = config_data['openai_api']
-            # 确保每项存在 name 字段
-            for item in OPENAI_API_CONFIG:
-                if 'name' not in item:
-                    item['name'] = ""
+            OPENAI_API_CONFIG[:] = _normalize_api_config_list_data(config_data['openai_api'])
             logger.info(f"加载了 {len(OPENAI_API_CONFIG)} 个OpenAI API密钥")
-            
-        # 加载max_rpm值（如果存在）
-        if 'max_rpm' in config_data and isinstance(config_data['max_rpm'], int):
-            DEFAULT_MAX_RPM = config_data['max_rpm']
             
         # 加载脱水比例配置（如果存在）
         if 'min_condensation_ratio' in config_data and isinstance(config_data['min_condensation_ratio'], int):
@@ -327,7 +330,7 @@ def create_config_template(config_path: Optional[str] = None) -> None:
                     "key": "你的gemini 密钥",
                     "redirect_url": "代理url 地址，可空。默认：https://generativelanguage.googleapis.com/v1beta/models",
                     "model": "模型，可空。默认：gemini-2.0-flash",
-                    "rpm": 10
+                    "concurrency": 1
                 },{
                     "name": "",
                     "key":"最简配置demo"
@@ -339,13 +342,12 @@ def create_config_template(config_path: Optional[str] = None) -> None:
                     "key": "你的openai 密钥或其他一切兼容openai-api 格式的,如DeepSeek等",
                     "redirect_url": "代理url，可空。默认：https://api.openai.com/v1/chat/completions",
                     "model": "模型，可空。默认：gpt-3.5-turbo",
-                    "rpm": 10
+                    "concurrency": 1
                 },{
                     "name": "",
                     "key":"最简配置demo"
                 }
             ],
-            "max_rpm": 20,
             "min_condensation_ratio": MIN_CONDENSATION_RATIO,
             "max_condensation_ratio": MAX_CONDENSATION_RATIO,
             "target_condensation_ratio": TARGET_CONDENSATION_RATIO,
@@ -370,15 +372,7 @@ def create_config_template(config_path: Optional[str] = None) -> None:
 
 def _normalize_api_config_list(api_configs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """规范化 API 配置列表，确保结构稳定。"""
-    normalized_configs: List[Dict[str, Any]] = []
-    for item in api_configs or []:
-        if not isinstance(item, dict):
-            continue
-        normalized_item = dict(item)
-        if "name" not in normalized_item:
-            normalized_item["name"] = ""
-        normalized_configs.append(normalized_item)
-    return normalized_configs
+    return _normalize_api_config_list_data(api_configs or [])
 
 
 def _sync_runtime_api_configs(
@@ -416,21 +410,17 @@ def save_api_config_lists(
         config_data: Dict[str, Any] = {
             "gemini_api": [],
             "openai_api": [],
-            "max_rpm": DEFAULT_MAX_RPM,
         }
         if os.path.exists(target_path):
             with open(target_path, 'r', encoding='utf-8') as f:
                 config_data = json.load(f)
-        elif "max_rpm" not in config_data:
-            config_data["max_rpm"] = DEFAULT_MAX_RPM
 
         normalized_gemini = _normalize_api_config_list(gemini_api)
         normalized_openai = _normalize_api_config_list(openai_api)
 
         config_data["gemini_api"] = normalized_gemini
         config_data["openai_api"] = normalized_openai
-        if "max_rpm" not in config_data or not isinstance(config_data["max_rpm"], int):
-            config_data["max_rpm"] = DEFAULT_MAX_RPM
+        config_data.pop("max_rpm", None)
 
         os.makedirs(os.path.dirname(target_path) or ".", exist_ok=True)
         with open(target_path, 'w', encoding='utf-8') as f:
@@ -461,6 +451,7 @@ def save_config_to_file(custom_prompt: str) -> bool:
         if os.path.exists(config_path):
             with open(config_path, 'r', encoding='utf-8') as f:
                 config_data = json.load(f)
+        config_data.pop('max_rpm', None)
         
         # 更新自定义提示词
         config_data['customer_prompt'] = custom_prompt

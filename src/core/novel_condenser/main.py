@@ -66,10 +66,18 @@ class NovelCondenser:
         
         # 根据API类型初始化对应的密钥管理器
         if self.api_type in ["gemini", "mixed"]:
-            self.gemini_key_manager = APIKeyManager(config.GEMINI_API_CONFIG, config.DEFAULT_MAX_RPM)
+            self.gemini_key_manager = APIKeyManager(config.GEMINI_API_CONFIG)
             
         if self.api_type in ["openai", "mixed"]:
-            self.openai_key_manager = APIKeyManager(config.OPENAI_API_CONFIG, config.DEFAULT_MAX_RPM)
+            self.openai_key_manager = APIKeyManager(config.OPENAI_API_CONFIG)
+
+        # 同步到模块级全局引用，确保 GUI 能读取当前任务实际使用的运行时状态
+        try:
+            import src.core.novel_condenser.main as current_main_module
+            current_main_module.gemini_key_manager = self.gemini_key_manager
+            current_main_module.openai_key_manager = self.openai_key_manager
+        except Exception:
+            pass
     
     def validate_api_keys(self):
         """验证API密钥是否有效"""

@@ -26,8 +26,7 @@ LOG_LEVEL = logging.INFO
 # Gemini API 配置
 DEFAULT_GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/"
 DEFAULT_GEMINI_MODEL = "gemini-2.0-flash"
-DEFAULT_KEY_RPM = 5  # 每个密钥默认每分钟请求数
-DEFAULT_MAX_RPM = 20  # 默认全局最大每分钟请求数
+DEFAULT_KEY_CONCURRENCY = 1  # 每个配置默认并发数
 GEMINI_API_CONFIG = []  # 从配置文件加载
 
 # OpenAI API 配置
@@ -58,7 +57,7 @@ def load_api_config():
     Returns:
         bool: 配置加载是否成功
     """
-    global GEMINI_API_CONFIG, OPENAI_API_CONFIG, DEFAULT_MAX_RPM
+    global GEMINI_API_CONFIG, OPENAI_API_CONFIG
 
     import json
 
@@ -75,6 +74,8 @@ def load_api_config():
             for item in GEMINI_API_CONFIG:
                 if 'name' not in item:
                     item['name'] = ""
+                if 'concurrency' not in item or not isinstance(item['concurrency'], int) or item['concurrency'] < 1:
+                    item['concurrency'] = DEFAULT_KEY_CONCURRENCY
 
         # 加载OpenAI API配置
         if 'openai_api' in config_data and isinstance(config_data['openai_api'], list):
@@ -82,10 +83,8 @@ def load_api_config():
             for item in OPENAI_API_CONFIG:
                 if 'name' not in item:
                     item['name'] = ""
-
-        # 加载max_rpm值（如果存在）
-        if 'max_rpm' in config_data and isinstance(config_data['max_rpm'], int):
-            DEFAULT_MAX_RPM = config_data['max_rpm']
+                if 'concurrency' not in item or not isinstance(item['concurrency'], int) or item['concurrency'] < 1:
+                    item['concurrency'] = DEFAULT_KEY_CONCURRENCY
 
         # 至少有一种API配置加载成功即可
         return len(GEMINI_API_CONFIG) > 0 or len(OPENAI_API_CONFIG) > 0

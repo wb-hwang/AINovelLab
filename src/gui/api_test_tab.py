@@ -102,10 +102,10 @@ class ApiConfigDialog(QDialog):
         self.key_input.setPlaceholderText("必填")
         form_layout.addRow("API Key", self.key_input)
 
-        self.rpm_spin = QSpinBox()
-        self.rpm_spin.setRange(1, 999999)
-        self.rpm_spin.setValue(int(self._config_data.get("rpm") or core_config.DEFAULT_KEY_RPM))
-        form_layout.addRow("RPM", self.rpm_spin)
+        self.concurrency_spin = QSpinBox()
+        self.concurrency_spin.setRange(1, 999)
+        self.concurrency_spin.setValue(int(self._config_data.get("concurrency") or core_config.DEFAULT_KEY_CONCURRENCY))
+        form_layout.addRow("并发数", self.concurrency_spin)
 
         layout.addLayout(form_layout)
 
@@ -137,7 +137,7 @@ class ApiConfigDialog(QDialog):
             "key": self.key_input.text().strip(),
             "redirect_url": self.redirect_url_input.text().strip(),
             "model": self.model_input.text().strip(),
-            "rpm": int(self.rpm_spin.value()),
+            "concurrency": int(self.concurrency_spin.value()),
         }
         return api_type, payload
 
@@ -339,7 +339,7 @@ class ApiTestTab(QWidget):
     def _sanitize_config_payload(self, payload: dict) -> dict:
         sanitized = {
             "key": payload.get("key", "").strip(),
-            "rpm": int(payload.get("rpm") or core_config.DEFAULT_KEY_RPM),
+            "concurrency": int(payload.get("concurrency") or core_config.DEFAULT_KEY_CONCURRENCY),
             "name": payload.get("name", "").strip(),
         }
         model = payload.get("model", "").strip()

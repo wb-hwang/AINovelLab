@@ -201,8 +201,7 @@ class WorkerThread(QThread):
                 try:
                     if hasattr(config, 'GEMINI_API_CONFIG') and config.GEMINI_API_CONFIG:
                         main_module.gemini_key_manager = key_manager.APIKeyManager(
-                            config.GEMINI_API_CONFIG, 
-                            config.DEFAULT_MAX_RPM
+                            config.GEMINI_API_CONFIG
                         )
                         gemini_concurrency = main_module.gemini_key_manager.get_max_concurrency()
                         gemini_api_count = len(config.GEMINI_API_CONFIG)
@@ -223,8 +222,7 @@ class WorkerThread(QThread):
                 try:
                     if hasattr(config, 'OPENAI_API_CONFIG') and config.OPENAI_API_CONFIG:
                         main_module.openai_key_manager = key_manager.APIKeyManager(
-                            config.OPENAI_API_CONFIG, 
-                            config.DEFAULT_MAX_RPM
+                            config.OPENAI_API_CONFIG
                         )
                         openai_concurrency = main_module.openai_key_manager.get_max_concurrency()
                         openai_api_count = len(config.OPENAI_API_CONFIG)
