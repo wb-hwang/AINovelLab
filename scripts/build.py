@@ -11,7 +11,6 @@
 from __future__ import annotations
 
 import argparse
-import json
 import os
 import platform
 import shutil
@@ -42,13 +41,6 @@ def _clean_artifacts(root: Path, name: str) -> None:
         if p.exists():
             shutil.rmtree(p, ignore_errors=True)
 
-    spec = root / f"{name}.spec"
-    if spec.exists():
-        try:
-            spec.unlink()
-        except Exception:
-            pass
-
 
 def _pyinstaller_cmd(root: Path, name: str, console: bool) -> list[str]:
     sep = _data_sep()
@@ -56,7 +48,6 @@ def _pyinstaller_cmd(root: Path, name: str, console: bool) -> list[str]:
         (root / "resources", "resources"),
         (root / "data", "data"),
         (root / "config", "config"),
-        (root / "api_keys.json", "."),
         (root / "src", "src"),
     ]
 
@@ -67,6 +58,8 @@ def _pyinstaller_cmd(root: Path, name: str, console: bool) -> list[str]:
     for src, dst in add_data:
         if src.exists():
             cmd.append(f"--add-data={src}{sep}{dst}")
+
+    cmd.append(f"--specpath={root / 'build' / 'pyinstaller-spec'}")
 
     cmd.extend(
         [
@@ -81,46 +74,18 @@ def _pyinstaller_cmd(root: Path, name: str, console: bool) -> list[str]:
             "--hidden-import=tqdm",
             "--hidden-import=requests",
             "--hidden-import=lxml",
+            "--exclude-module=matplotlib",
+            "--exclude-module=numpy",
+            "--exclude-module=pandas",
+            "--exclude-module=scipy",
+            "--exclude-module=tensorboard",
+            "--exclude-module=torch",
             "--noconfirm",
             "--clean",
             "run.py",
         ]
     )
     return cmd
-
-
-def _write_api_keys_template(dist_dir: Path) -> None:
-    template_config = {
-        "gemini_api": [
-            {
-                "name": "",
-                "key": "你的gemini 密钥",
-                "redirect_url": "代理url 地址，可空。默认：https://generativelanguage.googleapis.com/v1beta/models",
-                "model": "模型，可空。默认：gemini-2.0-flash",
-                "rpm": 10,
-            },
-            {"name": "", "key": "最简配置demo"},
-        ],
-        "openai_api": [
-            {
-                "name": "",
-                "key": "你的openai 密钥或其他一切兼容openai-api 格式的,如DeepSeek等",
-                "redirect_url": "代理url，可空。默认：https://api.openai.com/v1/chat/completions",
-                "model": "模型，可空。默认：gpt-3.5-turbo",
-                "rpm": 10,
-            },
-            {"name": "", "key": "最简配置demo"},
-        ],
-        "max_rpm": 20,
-    }
-
-    dist_dir.mkdir(parents=True, exist_ok=True)
-    template_path = dist_dir / "api_keys.json"
-    try:
-        template_path.write_text(json.dumps(template_config, ensure_ascii=False, indent=4), encoding="utf-8")
-    except Exception:
-        pass
-
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="AINovelLab PyInstaller 打包脚本")
@@ -138,11 +103,8 @@ def main(argv: list[str] | None = None) -> int:
 
     cmd = _pyinstaller_cmd(root, args.name, console=args.console)
     subprocess.check_call(cmd)
-
-    _write_api_keys_template(root / "dist" / args.name)
     return 0
 
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

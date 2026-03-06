@@ -1,164 +1,166 @@
 # AI小说工具项目结构说明
 
-本文档详细介绍了AI小说工具的项目结构和各模块功能。
+本文档基于当前仓库实际目录整理，重点说明核心模块职责和构建文件。
 
-![项目结构概览](image/1.png)
+## 顶层目录
 
-## 目录结构
-
-```
+```text
 AINovelLab/
-├── src/                   # 源代码目录
-│   ├── core/              # 核心功能模块
-│   │   ├── epub_splitter.py    # EPUB分割器
-│   │   ├── novel_condenser/    # 小说脱水工具(模块化)
-│   │   │   ├── __init__.py       # 包初始化文件
-│   │   │   ├── main.py           # 主模块
-│   │   │   ├── api_service.py    # API服务
-│   │   │   ├── file_utils.py     # 文件处理
-│   │   │   ├── config.py         # 配置管理
-│   │   │   ├── key_manager.py    # 密钥管理
-│   │   │   └── stats.py          # 统计模块
-│   │   ├── txt_to_epub.py      # TXT合并转EPUB工具
-│   │   ├── api_manager.py      # API密钥管理
-│   │   └── utils.py            # 通用工具函数
-│   ├── gui/               # GUI相关代码
-│   │   ├── main_window.py    # 主窗口
-│   │   ├── home_tab.py       # 首页标签
-│   │   ├── epub_splitter_tab.py # EPUB分割标签
-│   │   ├── condenser_tab.py  # 脱水工具标签
-│   │   ├── txt_to_epub_tab.py  # TXT转EPUB标签
-│   │   └── worker.py         # 后台工作线程
-│   ├── version.py         # 版本信息
-│   ├── import_helper.py    # 导入路径设置辅助模块
-│   └── main.py            # 主入口
-├── config/                # 配置文件目录
-│   ├── config.py          # 配置管理模块
-│   ├── config_compat.py   # 配置兼容性处理
-│   └── default_config.py  # 默认配置
-├── api_keys.json          # API密钥配置文件(放在根目录方便打包后修改)
-├── data/                  # 数据文件目录
-├── resources/             # 资源文件
-├── run.py                 # 项目入口脚本
-├── AINovelLab.spec       # PyInstaller打包配置文件
-└── README.md              # 项目说明文档
+├── config/                 # 运行配置与兼容层
+├── data/                   # 示例或运行期数据目录
+├── doc/                    # 项目文档
+├── resources/              # QSS 主题与静态资源
+├── scripts/                # 打包与回归脚本
+├── src/                    # 应用源代码
+├── api_keys.json           # API 配置文件
+├── AINovelLab.spec         # PyInstaller 打包配置
+├── requirements.txt        # Python 依赖
+├── run.py                  # 桌面应用入口脚本
+└── README.md               # 项目总说明
 ```
 
-## 核心模块说明
+## `src/` 结构
 
-### EPUB分割器
-
-`src/core/epub_splitter.py` 模块提供以下功能：
-
-- 解析EPUB电子书，提取章节内容
-- 按章节分割内容，支持自定义每个文件包含的章节数
-- 保存为单独的TXT文件，支持自定义输出格式
-
-### 小说脱水工具
-
-`src/core/novel_condenser/` 目录下的模块集成了小说内容压缩功能：
-
-- `main.py` - 脱水工具的主要逻辑和流程控制
-- `api_service.py` - 负责与各种AI API服务通信
-- `file_utils.py` - 文件处理工具，包括读写和路径管理
-- `config.py` - 配置管理，加载和验证配置
-- `key_manager.py` - API密钥管理和轮转
-- `stats.py` - 统计模块，追踪处理进度和结果
-
-脱水工具支持多种API服务，可以自动在不同服务间切换，并支持并行处理多个文件。
-
-### TXT合并转EPUB
-
-`src/core/txt_to_epub.py` 模块提供以下功能：
-
-- 读取多个TXT文件，按文件名顺序排序
-- 提取文件名中的元数据（书名、章节编号等）
-- 生成EPUB格式的电子书，包括目录和章节
-
-## GUI界面
-
-图形界面采用PyQt5开发，分为多个标签页：
-
-- `home_tab.py` - 首页，提供应用使用说明
-- `epub_splitter_tab.py` - EPUB分割功能界面
-- `condenser_tab.py` - 小说脱水功能界面
-- `txt_to_epub_tab.py` - TXT合并为EPUB功能界面
-- `worker.py` - 后台工作线程，处理耗时操作，避免界面卡顿
-
-![GUI界面示例](image/2.png)
-
-## 配置管理
-
-配置系统设计为灵活且易于修改：
-
-- 配置文件放在根目录，方便打包后修改
-- 使用JSON格式，易于人工编辑
-- 配置兼容性处理，支持版本升级时的配置迁移
-- 运行时自动重新加载配置，无需重启应用
-
-## 入口脚本
-
-`run.py` 是项目的主要入口点，提供以下功能：
-
-- 设置正确的导入路径
-- 检测运行环境（打包环境或开发环境）
-- 加载版本信息
-- 启动GUI或命令行界面
-
-## 模块间关系
-
-```
-                      ┌─────────────┐
-                      │    run.py   │
-                      └──────┬──────┘
-                             │
-                             ▼
-                      ┌─────────────┐
-                      │   main.py   │
-                      └──────┬──────┘
-                             │
-               ┌─────────────┴─────────────┐
-               │                           │
-               ▼                           ▼
-       ┌───────────────┐           ┌───────────────┐
-       │     GUI       │           │ Command Line  │
-       └───────┬───────┘           └───────┬───────┘
-               │                           │
-               ▼                           │
-       ┌───────────────┐                   │
-       │  main_window  │                   │
-       └───────┬───────┘                   │
-               │                           │
-       ┌───────┴───────┐                   │
-       ▼               ▼                   ▼
-┌─────────────┐  ┌─────────────┐    ┌─────────────┐
-│ EPUB Split  │  │  Condenser  │    │ Core Modules│
-└──────┬──────┘  └──────┬──────┘    └──────┬──────┘
-       │                │                  │
-       └────────┬───────┘                  │
-                │                          │
-                ▼                          ▼
-         ┌─────────────┐           ┌─────────────┐
-         │API Manager  │◄──────────┤ Config Mgmt │
-         └─────────────┘           └─────────────┘
+```text
+src/
+├── main.py
+├── version.py
+├── core/
+│   ├── epub_splitter.py
+│   ├── txt_to_epub.py
+│   ├── utils.py
+│   └── novel_condenser/
+│       ├── api_service.py
+│       ├── config.py
+│       ├── file_utils.py
+│       ├── key_manager.py
+│       ├── main.py
+│       └── stats.py
+└── gui/
+    ├── api_test_tab.py
+    ├── condenser_tab.py
+    ├── epub_splitter_tab.py
+    ├── home_tab.py
+    ├── main_window.py
+    ├── prompt_edit_dialog.py
+    ├── resources.py
+    ├── style.py
+    ├── txt_to_epub_tab.py
+    ├── ui_components.py
+    └── worker.py
 ```
 
-## 编码规范
+## 核心模块职责
 
-本项目遵循以下编码规范：
+### `src/core/`
 
-1. **PEP 8** - Python代码风格指南
-2. **模块化设计** - 每个模块只负责一个功能
-3. **统一的导入路径** - 使用导入帮助程序简化导入
-4. **异常处理** - 所有可能抛出异常的地方都有适当的处理
-5. **日志记录** - 使用Python标准日志模块记录运行状态
-6. **类型提示** - 使用类型注解提高代码可读性和可维护性
+- `epub_splitter.py`
+  - 负责 EPUB 解析和章节拆分
+  - 输出命名规范化的 TXT 文件
 
-## 扩展指南
+- `txt_to_epub.py`
+  - 按文件顺序合并 TXT
+  - 生成目录完整的 EPUB 文件
 
-如果你想扩展本项目的功能，以下是推荐的方式：
+- `novel_condenser/main.py`
+  - 组织脱水任务主流程
+  - 连接文件处理、配置加载、调度器与统计模块
 
-1. **添加新的API提供商**：修改`api_service.py`和`key_manager.py`模块
-2. **添加新的处理算法**：在`novel_condenser`目录下创建新的处理模块
-3. **增强GUI功能**：在`gui`目录下修改或添加新的标签页
-4. **添加新的输出格式**：扩展`txt_to_epub.py`或创建新的转换模块 
+- `novel_condenser/api_service.py`
+  - 封装 Gemini / OpenAI 兼容接口调用
+  - 提供正式任务请求与 API 测试请求
+
+- `novel_condenser/key_manager.py`
+  - 管理每条配置的并发额度
+  - 维护失败冷却、跳过策略和运行状态统计
+
+- `novel_condenser/config.py`
+  - 读写 `api_keys.json`
+  - 规范化配置项，移除已废弃字段
+
+### `src/gui/`
+
+- `main_window.py`
+  - 主窗口与标签页装配
+
+- `home_tab.py`
+  - 首页仪表盘和功能说明
+
+- `epub_splitter_tab.py`
+  - EPUB 转 TXT 工作台
+
+- `condenser_tab.py`
+  - 脱水处理工作台
+  - 包含 `配置状态` 弹窗入口
+
+- `txt_to_epub_tab.py`
+  - TXT 转 EPUB 工作台
+
+- `api_test_tab.py`
+  - API 配置管理与测试页面
+  - 支持新增、编辑、删除、测试配置
+
+- `prompt_edit_dialog.py`
+  - 提示词模板编辑与单次脱水测试对话框
+
+- `ui_components.py`
+  - 通用卡片、状态标签、弹窗辅助组件
+
+- `worker.py`
+  - 后台线程任务封装，避免 UI 阻塞
+
+## `config/` 目录
+
+- `config.py`
+  - 桌面应用侧配置加载入口
+  - 同步当前 `concurrency` 模型
+
+- `config_compat.py`
+  - 兼容旧配置和运行环境差异
+
+## `scripts/` 目录
+
+- `build.py`
+  - 统一的 PyInstaller 打包入口
+
+- `build_exe.py`
+  - 兼容旧用法的打包包装脚本
+
+- `quick_build.py`
+  - 快速打包包装脚本
+
+- `smoke.py`
+  - 最小回归脚本
+  - 当前覆盖配置路径和 `TXT -> EPUB` 基本流程
+
+## 配置与资源
+
+- `api_keys.json`
+  - 当前使用 `gemini_api` / `openai_api` 双列表结构
+  - 每条配置使用 `concurrency` 控制并发
+
+- `resources/material_dark.qss`
+  - 全局暗色主题样式表
+
+## 入口与构建
+
+- `run.py`
+  - 添加项目根目录到 `sys.path`
+  - 启动 `src.main.main()`
+
+- `AINovelLab.spec`
+  - 当前可直接用于 `pyinstaller AINovelLab.spec`
+
+## 关系概览
+
+```text
+run.py
+  └─ src/main.py
+      └─ gui/main_window.py
+          ├─ home_tab.py
+          ├─ epub_splitter_tab.py
+          ├─ condenser_tab.py
+          │   └─ worker.py -> core/novel_condenser/*
+          ├─ txt_to_epub_tab.py
+          └─ api_test_tab.py -> core/novel_condenser/config.py
+```

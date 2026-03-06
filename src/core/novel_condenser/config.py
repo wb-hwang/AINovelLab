@@ -74,6 +74,8 @@ def get_config_file_path() -> str:
     if project_config and hasattr(project_config, 'CONFIG_FILE_PATH'):
         if os.path.exists(project_config.CONFIG_FILE_PATH):
             return project_config.CONFIG_FILE_PATH
+        if getattr(sys, 'frozen', False):
+            return project_config.CONFIG_FILE_PATH
     
     # 否则按优先级查找
     for path in get_possible_config_paths():

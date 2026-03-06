@@ -6,8 +6,8 @@
 
 ## 版本信息
 
-- 当前版本：v0.0.1 (release)
-- 构建日期：2024-04-07
+- 当前版本：v0.1.0 (release)
+- 构建日期：2026-03-06
 - 支持平台：Windows/macOS/Linux
 
 ## 核心功能
@@ -55,6 +55,14 @@
 2. 安装依赖：`pip install -r requirements.txt`
 3. 运行程序：`python run.py`
 
+### 方法三：自行编译 EXE
+
+1. 安装依赖：`pip install -r requirements.txt`
+2. 执行 `pyinstaller AINovelLab.spec`
+3. 生成目录位于 `dist/AINovelLab`
+
+也可以执行 `python scripts/build.py`
+
 ## 基本使用
 
 ### 脱水处理流程
@@ -87,8 +95,9 @@
 
 - `concurrency`：单条配置允许同时处理的任务数
 - 不再使用 `rpm` / `max_rpm`
+- 打包产物默认不再附带 `api_keys.json`
 - `API测试` 页支持新增、编辑、删除配置；如果目标位置没有 `api_keys.json`，新增配置时会自动创建
-- `脱水处理` 页的 `配置状态` 按钮可查看每条配置的本次任务状态、实际并发数、配置并发数、成功/失败请求数
+- `脱水处理` 页的 `配置状态` 按钮可查看每条配置的本次任务状态、实际并发数、配置并发数、成功/失败请求数、成功率
 
 > **详细API配置**：请参阅[API配置详细说明](doc/API_CONFIG.md)
 

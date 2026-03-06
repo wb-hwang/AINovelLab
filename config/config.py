@@ -5,12 +5,19 @@
 """
 
 import os
+import sys
 import logging
 from pathlib import Path
 
-# 基础路径设置：config/config.py → 项目根目录
-BASE_DIR = Path(__file__).resolve().parent.parent
-PROJECT_ROOT = BASE_DIR
+# 基础路径设置：
+# - 开发环境：config/config.py → 项目根目录
+# - 打包环境：优先使用 exe 所在目录，便于用户直接修改同目录下的配置文件
+if getattr(sys, "frozen", False):
+    PROJECT_ROOT = Path(sys.executable).resolve().parent
+    BASE_DIR = PROJECT_ROOT
+else:
+    BASE_DIR = Path(__file__).resolve().parent.parent
+    PROJECT_ROOT = BASE_DIR
 
 # 配置文件路径
 CONFIG_FILE_PATH = str(PROJECT_ROOT / "api_keys.json")
